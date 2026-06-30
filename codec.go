@@ -125,18 +125,7 @@ func (s series) pending() (*pending, error) {
 			decodeErr = err
 			return false
 		}
-		switch seg.kind {
-		case segmentSamples:
-			decodeErr = decodeSamples(raw, seg.count, &out.Samples)
-		case segmentCounters:
-			decodeErr = decodeCounters(raw, seg.count, &out.Counters)
-		case segmentSampleBuckets:
-			decodeErr = decodeSampleBuckets(raw, seg.count, &out.Samples)
-		case segmentCounterBuckets:
-			decodeErr = decodeCounterBuckets(raw, seg.count, &out.Counters)
-		default:
-			decodeErr = errVarintCodec
-		}
+		decodeErr = seg.applyRaw(&out, raw)
 		if decodeErr != nil {
 			out = pending{}
 			return false
@@ -217,6 +206,21 @@ func (s series) scan(yield func(segment) bool) error {
 		}
 	}
 	return r.err
+}
+
+func (seg segment) applyRaw(out *pending, raw []byte) error {
+	switch seg.kind {
+	case segmentSamples:
+		return decodeSamples(raw, seg.count, &out.Samples)
+	case segmentCounters:
+		return decodeCounters(raw, seg.count, &out.Counters)
+	case segmentSampleBuckets:
+		return decodeSampleBuckets(raw, seg.count, &out.Samples)
+	case segmentCounterBuckets:
+		return decodeCounterBuckets(raw, seg.count, &out.Counters)
+	default:
+		return errVarintCodec
+	}
 }
 
 func (seg segment) decodeInto(dst []byte) ([]byte, error) {

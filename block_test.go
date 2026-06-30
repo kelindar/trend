@@ -33,4 +33,14 @@ func TestBlock(t *testing.T) {
 		assert.Equal(t, clock, gotClock)
 		assert.Equal(t, replica, gotReplica)
 	})
+
+	t.Run("decode errors", func(t *testing.T) {
+		var data sampleData
+		assert.Error(t, decodeSamples([]byte{1}, 2, &data))
+		var counters counterData
+		assert.Error(t, decodeCounters([]byte{1}, 2, &counters))
+
+		r := codecReader{data: []byte{1}}
+		assert.ErrorIs(t, r.done(), errLongCodec)
+	})
 }

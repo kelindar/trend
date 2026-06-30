@@ -101,6 +101,19 @@ func TestSampleIteratorsStop(t *testing.T) {
 		mixed.rangeValues(2, 2, 60, Sum, y)
 	})
 	assert.Equal(t, []float64{6}, got)
+
+	mixed = sampleData{
+		Buckets: []sampleBucket{
+			{Time: 1, Count: 1, Sum: 1, Min: 1, Max: 1, First: 1, Last: 1},
+			{Time: 61, Count: 1, Sum: 2, Min: 2, Max: 2, First: 2, Last: 2},
+		},
+	}
+	calls = 0
+	mixed.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
+		calls++
+		return false
+	})
+	assert.Equal(t, 1, calls)
 }
 
 func TestSampleState(t *testing.T) {

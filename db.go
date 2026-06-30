@@ -181,7 +181,7 @@ func (db *DB) load(ctx context.Context, key string) (series, error) {
 				return nil, err
 			}
 			current.Merge(tail)
-			raw, err = current.marshal()
+			raw, err = loadMarshal(current)
 			if err != nil {
 				return nil, err
 			}
@@ -199,6 +199,10 @@ func (db *DB) dropCache(key string) {
 
 func sampleKey(key string) string  { return "s:" + key }
 func counterKey(key string) string { return "c:" + key }
+
+var loadMarshal = func(p *pending) ([]byte, error) {
+	return p.marshal()
+}
 
 // -----------------------------------------------------------------------------
 

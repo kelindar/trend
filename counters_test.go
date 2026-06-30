@@ -104,6 +104,26 @@ func TestCounterIteratorsStop(t *testing.T) {
 		mixed.rangeValues(2, 2, 60, Sum, y)
 	})
 	assert.Equal(t, []float64{9}, got)
+
+	buckets := counterData{
+		Buckets: []counterBucket{{Time: 1, Sum: 1}, {Time: 2, Sum: 2}},
+	}
+	calls = 0
+	buckets.values(1, 2, func(time.Time, float64) bool {
+		calls++
+		return false
+	})
+	assert.Equal(t, 1, calls)
+
+	buckets = counterData{
+		Buckets: []counterBucket{{Time: 1, Sum: 1}, {Time: 61, Sum: 2}},
+	}
+	calls = 0
+	buckets.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
+		calls++
+		return false
+	})
+	assert.Equal(t, 1, calls)
 }
 
 func TestCounterState(t *testing.T) {
