@@ -32,7 +32,7 @@ func (db *DB) compact(ctx context.Context, key string) error {
 	}
 
 	cutoff := time.Now().Add(-db.compactor.after)
-	err := db.store.Update(ctx, key, func(old []byte) ([]byte, error) {
+	return db.store.Update(ctx, key, func(old []byte) ([]byte, error) {
 		current, err := series(old).pending()
 		if err != nil {
 			return nil, err
@@ -40,10 +40,6 @@ func (db *DB) compact(ctx context.Context, key string) error {
 		current.Compact(cutoff, db.compactor.span)
 		return current.marshal()
 	})
-	if err == nil {
-		db.dropCache(key)
-	}
-	return err
 }
 
 func (db *DB) compactLoop(ctx context.Context) {

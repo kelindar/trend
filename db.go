@@ -8,8 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/allegro/bigcache/v3"
 )
 
 // DB stores time-series samples and counters.
@@ -17,7 +15,6 @@ type DB struct {
 	store      Store
 	replica    uint64
 	clock      atomic.Uint64
-	cache      *bigcache.BigCache
 	flushEvery time.Duration
 	seen       sync.Map
 	buffer     *buffer
@@ -81,9 +78,6 @@ func (db *DB) Close() error {
 	if err := db.Flush(context.Background()); err != nil {
 		return err
 	}
-	if db.cache != nil {
-		_ = db.cache.Close()
-	}
 	return db.store.Close()
 }
 
@@ -125,7 +119,6 @@ func (db *DB) writeSample(ctx context.Context, key string, at uint64, value floa
 	clock := db.clock.Add(1)
 	if db.buffer != nil {
 		db.buffer.addSample(key, at, value, clock, db.replica)
-		db.dropCache(key)
 		return nil
 	}
 	var delta pending
@@ -133,7 +126,6 @@ func (db *DB) writeSample(ctx context.Context, key string, at uint64, value floa
 	if err := db.merge(ctx, key, &delta); err != nil {
 		return err
 	}
-	db.dropCache(key)
 	return nil
 }
 
@@ -141,7 +133,6 @@ func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) er
 	clock := db.clock.Add(1)
 	if db.buffer != nil {
 		db.buffer.addCounter(key, at, db.replica, clock, value)
-		db.dropCache(key)
 		return nil
 	}
 	var delta pending
@@ -149,52 +140,40 @@ func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) er
 	if err := db.merge(ctx, key, &delta); err != nil {
 		return err
 	}
-	db.dropCache(key)
 	return nil
 }
 
+func (db *DB) loadRaw(ctx context.Context, key string) (series, error) {
+	raw, err := db.store.Load(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return series(raw), nil
+}
+
 func (db *DB) load(ctx context.Context, key string) (series, error) {
-	var raw []byte
-	if db.cache != nil {
-		if v, err := db.cache.Get(key); err == nil {
-			raw = v
-		}
+	raw, err := db.loadRaw(ctx, key)
+	if err != nil {
+		return nil, err
 	}
-	if raw == nil {
-		var err error
-		if raw, err = db.store.Load(ctx, key); err != nil {
-			return nil, err
-		}
-		if db.cache != nil && raw != nil {
-			_ = db.cache.Set(key, raw)
-		}
-	}
-	out := series(raw)
-	if err := out.valid(); err != nil {
+	if err := raw.versionOK(); err != nil {
 		return nil, err
 	}
 	if db.buffer != nil {
-		tail := db.buffer.clone(key)
-		if tail != nil {
-			current, err := out.pending()
+		if tail := db.buffer.clone(key); tail != nil {
+			current, err := raw.pending()
 			if err != nil {
 				return nil, err
 			}
 			current.Merge(tail)
-			raw, err = loadMarshal(current)
+			marshaled, err := loadMarshal(current)
 			if err != nil {
 				return nil, err
 			}
-			out = series(raw)
+			raw = series(marshaled)
 		}
 	}
-	return out, nil
-}
-
-func (db *DB) dropCache(key string) {
-	if db.cache != nil {
-		_ = db.cache.Delete(key)
-	}
+	return raw, nil
 }
 
 func sampleKey(key string) string  { return "s:" + key }

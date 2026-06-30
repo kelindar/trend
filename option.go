@@ -4,12 +4,10 @@
 package trend
 
 import (
-	"context"
 	"hash/fnv"
 	"time"
 
-	"github.com/allegro/bigcache/v3"
-	"github.com/rs/xid"
+	"github.com/kelindar/trend/machine"
 )
 
 // Option configures a DB.
@@ -20,15 +18,6 @@ func WithReplica(id string) Option {
 	return func(db *DB) error {
 		db.replica = hashReplica(id)
 		return nil
-	}
-}
-
-// WithCache enables a local read-through cache.
-func WithCache(ttl time.Duration) Option {
-	return func(db *DB) error {
-		cache, err := bigcache.New(context.Background(), bigcache.DefaultConfig(ttl))
-		db.cache = cache
-		return err
 	}
 }
 
@@ -59,7 +48,7 @@ func WithCompactor(every, jitter time.Duration) Option {
 }
 
 func defaultReplica() uint64 {
-	return hashReplica(xid.New().String())
+	return uint64(machine.ID())
 }
 
 func hashReplica(id string) uint64 {

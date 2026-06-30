@@ -48,7 +48,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	db, err := trend.Open("buntdb:///:memory:", trend.WithCache(time.Minute))
+	db, err := trend.Open("buntdb:///:memory:")
 	if err != nil {
 		panic(err)
 	}

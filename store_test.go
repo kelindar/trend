@@ -108,7 +108,7 @@ func TestStore(t *testing.T) {
 	assert.Error(t, err)
 	_, err = Open("missing://x")
 	assert.Error(t, err)
-	db, err := Open("mem://x", WithReplica("r1"), WithCache(time.Second))
+	db, err := Open("mem://x", WithReplica("r1"))
 	require.NoError(t, err)
 	assert.Equal(t, hashReplica("r1"), db.replica)
 	require.NoError(t, db.Close())
