@@ -11,7 +11,6 @@ require (
 
 require (
 	github.com/allegro/bigcache/v3 v3.1.0 // indirect
-	github.com/kelindar/binary v1.0.19 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/tidwall/btree v1.4.2 // indirect

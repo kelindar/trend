@@ -140,43 +140,6 @@ func TestCodecRejectsInvalidShape(t *testing.T) {
 	}
 }
 
-func BenchmarkCodec(b *testing.B) {
-	input := codecSeries(10_000)
-	encoded, err := input.Marshal()
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	b.Run("marshal_10k", func(b *testing.B) {
-		b.ReportAllocs()
-		var out []byte
-		for b.Loop() {
-			var err error
-			out, err = input.Marshal()
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(out) == 0 {
-				b.Fatal("empty marshal")
-			}
-		}
-		b.ReportMetric(float64(len(out)), "encoded_bytes/op")
-	})
-	b.Run("decode_10k", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			out, err := decode(encoded)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(out.Samples.Time) != 10_000 || len(out.Counters.Time) != 10_000 {
-				b.Fatal("bad decode")
-			}
-		}
-		b.ReportMetric(float64(len(encoded)), "encoded_bytes/op")
-	})
-}
-
 func codecSeries(n int) *series {
 	var s series
 	for i := range uint64(n) {

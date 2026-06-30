@@ -24,6 +24,14 @@ func (d *counterData) Append(delta counterData) {
 	d.Buckets = append(d.Buckets, delta.Buckets...)
 }
 
+func (d *counterData) Reset() {
+	d.Time = d.Time[:0]
+	d.Replica = d.Replica[:0]
+	d.Clock = d.Clock[:0]
+	d.Value = d.Value[:0]
+	d.Buckets = d.Buckets[:0]
+}
+
 func (d *counterData) Merge(delta counterData) {
 	ops := make(map[uint64]map[counterOp]struct{}, len(d.Time)+len(delta.Time))
 	add := func(t, replica, clock, value uint64) {

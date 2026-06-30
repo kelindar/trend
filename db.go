@@ -5,7 +5,6 @@ package trend
 
 import (
 	"context"
-	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,15 +14,15 @@ import (
 
 // DB stores time-series samples and counters.
 type DB struct {
-	store         Store
-	replica       uint64
-	clock         atomic.Uint64
-	cache         *bigcache.BigCache
-	flushEvery    time.Duration
-	seen          sync.Map
-	buffer        *buffer
-	done          context.CancelFunc
-	compactor     compactor
+	store      Store
+	replica    uint64
+	clock      atomic.Uint64
+	cache      *bigcache.BigCache
+	flushEvery time.Duration
+	seen       sync.Map
+	buffer     *buffer
+	done       context.CancelFunc
+	compactor  compactor
 }
 
 // Open opens a registered store URI.
@@ -38,8 +37,8 @@ func Open(uri string, opts ...Option) (*DB, error) {
 // New creates a DB over an existing store.
 func New(store Store, opts ...Option) (*DB, error) {
 	db := &DB{
-		store:   store,
-		replica: defaultReplica(),
+		store:     store,
+		replica:   defaultReplica(),
 		compactor: compactor{after: 24 * time.Hour, span: time.Hour},
 	}
 	for _, opt := range opts {
@@ -98,6 +97,7 @@ func (db *DB) Flush(ctx context.Context) error {
 		if err := db.merge(ctx, key, delta); err != nil {
 			return err
 		}
+		db.buffer.recycle(delta)
 	}
 	return nil
 }
@@ -117,6 +117,9 @@ func (db *DB) flushLoop(ctx context.Context) {
 
 func (db *DB) merge(ctx context.Context, key string, delta *series) error {
 	return db.store.Update(ctx, key, func(old []byte) ([]byte, error) {
+		if len(old) == 0 {
+			return delta.Marshal()
+		}
 		current, err := decode(old)
 		if err != nil {
 			return nil, err
@@ -143,7 +146,6 @@ func (db *DB) write(ctx context.Context, key string, delta *series) error {
 func (db *DB) writeSample(ctx context.Context, key string, at uint64, value float64) error {
 	clock := db.clock.Add(1)
 	if db.buffer != nil {
-		db.seen.Store(key, struct{}{})
 		db.buffer.addSample(key, at, value, clock, db.replica)
 		db.dropCache(key)
 		return nil
@@ -156,7 +158,6 @@ func (db *DB) writeSample(ctx context.Context, key string, at uint64, value floa
 func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) error {
 	clock := db.clock.Add(1)
 	if db.buffer != nil {
-		db.seen.Store(key, struct{}{})
 		db.buffer.addCounter(key, at, db.replica, clock, value)
 		db.dropCache(key)
 		return nil
@@ -206,13 +207,14 @@ func counterKey(key string) string { return "c:" + key }
 type buffer struct {
 	mu    sync.Mutex
 	items map[string]*series
+	spare []*series
 }
 
 func (b *buffer) flush() map[string]*series {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	items := maps.Clone(b.items)
-	clear(b.items)
+	items := b.items
+	b.items = make(map[string]*series, len(items))
 	return items
 }
 
@@ -242,7 +244,24 @@ func (b *buffer) mergeInto(key string, out *series) {
 
 func (b *buffer) series(key string) *series {
 	if b.items[key] == nil {
-		b.items[key] = &series{}
+		b.items[key] = b.get()
 	}
 	return b.items[key]
+}
+
+func (b *buffer) get() *series {
+	n := len(b.spare)
+	if n == 0 {
+		return &series{}
+	}
+	out := b.spare[n-1]
+	b.spare = b.spare[:n-1]
+	return out
+}
+
+func (b *buffer) recycle(s *series) {
+	s.Reset()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.spare = append(b.spare, s)
 }

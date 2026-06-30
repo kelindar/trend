@@ -14,7 +14,7 @@ import (
 
 func TestCases(t *testing.T) {
 	cases := cases()
-	if len(cases) != 4 {
+	if len(cases) != 6 {
 		t.Fatalf("cases: %d", len(cases))
 	}
 	for _, tc := range cases {
@@ -40,15 +40,28 @@ func TestMain(t *testing.T) {
 
 func TestMemoryStore(t *testing.T) {
 	ctx := context.Background()
-	db := newBufferedDB("test")
-	if err := db.Samples("x").Set(ctx, time.Unix(1, 0), 1); err != nil {
+	store := newMemoryStore()
+	if err := store.Update(ctx, "x", func([]byte) ([]byte, error) {
+		return []byte("ok"), nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Flush(ctx); err != nil {
+	got, err := store.Load(ctx, "x")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Close(); err != nil {
+	if string(got) != "ok" {
+		t.Fatalf("load: %q", got)
+	}
+	if err := store.Delete(ctx, "x"); err != nil {
 		t.Fatal(err)
+	}
+	got, err = store.Load(ctx, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("delete: %q", got)
 	}
 }
 
