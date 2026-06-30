@@ -33,12 +33,12 @@ func (db *DB) compact(ctx context.Context, key string) error {
 
 	cutoff := time.Now().Add(-db.compactor.after)
 	err := db.store.Update(ctx, key, func(old []byte) ([]byte, error) {
-		current, err := decode(old)
+		current, err := series(old).pending()
 		if err != nil {
 			return nil, err
 		}
 		current.Compact(cutoff, db.compactor.span)
-		return current.Marshal()
+		return current.marshal()
 	})
 	if err == nil {
 		db.dropCache(key)

@@ -28,7 +28,7 @@ func (c Counters) Values(ctx context.Context, from, to time.Time) (iter.Seq2[tim
 	}
 	fromUnix, toUnix := uint64(from.Unix()), uint64(to.Unix())
 	return func(yield func(time.Time, float64) bool) {
-		data.Counters.values(fromUnix, toUnix, yield)
+		_ = data.counterValues(fromUnix, toUnix, yield)
 	}, nil
 }
 
@@ -40,7 +40,7 @@ func (c Counters) Range(ctx context.Context, from, to time.Time, span time.Durat
 	}
 	fromUnix, toUnix := uint64(from.Unix()), uint64(to.Unix())
 	return func(yield func(time.Time, float64) bool) {
-		data.Counters.rangeValues(fromUnix, toUnix, uint64(span.Seconds()), agg, yield)
+		_ = data.counterRange(fromUnix, toUnix, uint64(span.Seconds()), agg, yield)
 	}, nil
 }
 
@@ -49,7 +49,185 @@ func (c Counters) Compact(ctx context.Context) error {
 	return c.db.compact(ctx, c.key)
 }
 
+func (s series) counterValues(from, to uint64, yield func(time.Time, float64) bool) error {
+	var times [segmentSize]uint64
+	var values [segmentSize]uint64
+	var current uint64
+	var sum uint64
+	var have bool
+	var decodeErr error
+	buf := encodeBuffers.Get().(*codecBuffer)
+	defer putEncodeBuffer(buf)
+	flush := func() bool {
+		if !have {
+			return true
+		}
+		ok := yield(blockTime(current), float64(sum))
+		sum, have = 0, false
+		return ok
+	}
+	err := s.scan(func(seg segment) bool {
+		switch seg.kind {
+		case segmentCounters:
+			if seg.to < from || seg.from > to {
+				return true
+			}
+			raw, err := seg.decodeInto(buf.raw)
+			buf.raw = raw
+			if err != nil {
+				decodeErr = err
+				return false
+			}
+			if err := decodeCounterValues(raw, times[:seg.count], values[:seg.count]); err != nil {
+				decodeErr = err
+				return false
+			}
+			for i, t := range times[:seg.count] {
+				if t < from || t > to {
+					continue
+				}
+				if have && t != current && !flush() {
+					return false
+				}
+				current, have = t, true
+				sum += values[i]
+			}
+		case segmentCounterBuckets:
+			if seg.to < from || seg.from > to {
+				return true
+			}
+			var data counterData
+			raw, err := seg.decodeInto(buf.raw)
+			buf.raw = raw
+			if err != nil {
+				decodeErr = err
+				return false
+			}
+			if err := decodeCounterBuckets(raw, seg.count, &data); err != nil {
+				decodeErr = err
+				return false
+			}
+			for _, b := range data.Buckets {
+				if b.Time < from || b.Time > to {
+					continue
+				}
+				if have && b.Time != current && !flush() {
+					return false
+				}
+				current, have = b.Time, true
+				sum += b.Sum
+			}
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	if decodeErr != nil {
+		return decodeErr
+	}
+	flush()
+	return nil
+}
+
+func (s series) counterRange(from, to, span uint64, agg Agg, yield func(time.Time, float64) bool) error {
+	if span == 0 {
+		return s.counterValues(from, to, yield)
+	}
+	var times [segmentSize]uint64
+	var values [segmentSize]uint64
+	var current uint64
+	var f fold
+	var decodeErr error
+	buf := encodeBuffers.Get().(*codecBuffer)
+	defer putEncodeBuffer(buf)
+	err := s.scan(func(seg segment) bool {
+		switch seg.kind {
+		case segmentCounters:
+			if seg.to < from || seg.from > to {
+				return true
+			}
+			raw, err := seg.decodeInto(buf.raw)
+			buf.raw = raw
+			if err != nil {
+				decodeErr = err
+				return false
+			}
+			if err := decodeCounterValues(raw, times[:seg.count], values[:seg.count]); err != nil {
+				decodeErr = err
+				return false
+			}
+			for i, t := range times[:seg.count] {
+				if t < from || t > to {
+					continue
+				}
+				k := bucketOf(t, span)
+				if f.count > 0 && k != current {
+					if !yield(blockTime(current), f.Value(agg)) {
+						return false
+					}
+					f = fold{}
+				}
+				current = k
+				f.Add(float64(values[i]))
+			}
+		case segmentCounterBuckets:
+			if seg.to < from || seg.from > to {
+				return true
+			}
+			var data counterData
+			raw, err := seg.decodeInto(buf.raw)
+			buf.raw = raw
+			if err != nil {
+				decodeErr = err
+				return false
+			}
+			if err := decodeCounterBuckets(raw, seg.count, &data); err != nil {
+				decodeErr = err
+				return false
+			}
+			for _, b := range data.Buckets {
+				if b.Time < from || b.Time > to {
+					continue
+				}
+				k := bucketOf(b.Time, span)
+				if f.count > 0 && k != current {
+					if !yield(blockTime(current), f.Value(agg)) {
+						return false
+					}
+					f = fold{}
+				}
+				current = k
+				f.Add(float64(b.Sum))
+			}
+		}
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	if decodeErr != nil {
+		return decodeErr
+	}
+	if f.count > 0 {
+		yield(blockTime(current), f.Value(agg))
+	}
+	return nil
+}
+
 func (d counterData) values(from, to uint64, yield func(time.Time, float64) bool) {
+	var current uint64
+	var sum uint64
+	var have bool
+	flush := func() bool {
+		if !have {
+			return true
+		}
+		ok := yield(blockTime(current), float64(sum))
+		sum, have = 0, false
+		return ok
+	}
+
 	bucket, item := 0, 0
 	for bucket < len(d.Buckets) && d.Buckets[bucket].Time < from {
 		bucket++
@@ -61,35 +239,28 @@ func (d counterData) values(from, to uint64, yield func(time.Time, float64) bool
 		if item >= len(d.Time) || bucket < len(d.Buckets) && d.Buckets[bucket].Time <= d.Time[item] {
 			t := d.Buckets[bucket].Time
 			if t > to {
+				break
+			}
+			if have && t != current && !flush() {
 				return
 			}
-			sum := uint64(0)
-			for bucket < len(d.Buckets) && d.Buckets[bucket].Time == t {
-				sum += d.Buckets[bucket].Sum
-				bucket++
-			}
-			for item < len(d.Time) && d.Time[item] == t {
-				sum += d.Value[item]
-				item++
-			}
-			if !yield(time.Unix(int64(t), 0), float64(sum)) {
-				return
-			}
+			current, have = t, true
+			sum += d.Buckets[bucket].Sum
+			bucket++
 			continue
 		}
 		t := d.Time[item]
 		if t > to {
+			break
+		}
+		if have && t != current && !flush() {
 			return
 		}
-		sum := uint64(0)
-		for item < len(d.Time) && d.Time[item] == t {
-			sum += d.Value[item]
-			item++
-		}
-		if !yield(time.Unix(int64(t), 0), float64(sum)) {
-			return
-		}
+		current, have = t, true
+		sum += d.Value[item]
+		item++
 	}
+	flush()
 }
 
 func (d counterData) rangeValues(from, to, span uint64, agg Agg, yield func(time.Time, float64) bool) {
@@ -97,32 +268,19 @@ func (d counterData) rangeValues(from, to, span uint64, agg Agg, yield func(time
 		d.values(from, to, yield)
 		return
 	}
-	if len(d.Buckets) == 0 {
-		var current uint64
-		var f fold
-		i := 0
-		for i < len(d.Time) && d.Time[i] < from {
-			i++
-		}
-		for ; i < len(d.Time); i++ {
-			t := d.Time[i]
-			if t > to {
-				break
+	var current uint64
+	var f fold
+	add := func(t uint64, v float64) bool {
+		k := bucketOf(t, span)
+		if f.count > 0 && k != current {
+			if !yield(blockTime(current), f.Value(agg)) {
+				return false
 			}
-			k := bucketOf(t, span)
-			if f.count > 0 && k != current {
-				if !yield(time.Unix(int64(current), 0), f.Value(agg)) {
-					return
-				}
-				f = fold{}
-			}
-			current = k
-			f.Add(float64(d.Value[i]))
+			f = fold{}
 		}
-		if f.count > 0 {
-			yield(time.Unix(int64(current), 0), f.Value(agg))
-		}
-		return
+		current = k
+		f.Add(v)
+		return true
 	}
 
 	bucket, item := 0, 0
@@ -132,31 +290,25 @@ func (d counterData) rangeValues(from, to, span uint64, agg Agg, yield func(time
 	for item < len(d.Time) && d.Time[item] < from {
 		item++
 	}
-
 	for {
 		hasBucket := bucket < len(d.Buckets) && d.Buckets[bucket].Time <= to
 		hasItem := item < len(d.Time) && d.Time[item] <= to
 		if !hasBucket && !hasItem {
-			return
+			break
 		}
-		var current uint64
-		if hasItem {
-			current = bucketOf(d.Time[item], span)
-		}
-		if !hasItem || hasBucket && bucketOf(d.Buckets[bucket].Time, span) < current {
-			current = bucketOf(d.Buckets[bucket].Time, span)
-		}
-		var f fold
-		for bucket < len(d.Buckets) && d.Buckets[bucket].Time <= to && bucketOf(d.Buckets[bucket].Time, span) == current {
-			f.Add(float64(d.Buckets[bucket].Sum))
+		if !hasItem || hasBucket && d.Buckets[bucket].Time <= d.Time[item] {
+			if !add(d.Buckets[bucket].Time, float64(d.Buckets[bucket].Sum)) {
+				return
+			}
 			bucket++
+			continue
 		}
-		for item < len(d.Time) && d.Time[item] <= to && bucketOf(d.Time[item], span) == current {
-			f.Add(float64(d.Value[item]))
-			item++
-		}
-		if !yield(time.Unix(int64(current), 0), f.Value(agg)) {
+		if !add(d.Time[item], float64(d.Value[item])) {
 			return
 		}
+		item++
+	}
+	if f.count > 0 {
+		yield(blockTime(current), f.Value(agg))
 	}
 }

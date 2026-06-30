@@ -12,7 +12,7 @@ import (
 )
 
 func TestSamples(t *testing.T) {
-	var s series
+	var s pending
 	s.Samples.Add(1, 1, 1, 1)
 	s.Samples.Add(2, 3, 2, 1)
 	s.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 4, Min: 4, Max: 4, First: 4, Last: 4}}
@@ -25,7 +25,7 @@ func TestSamples(t *testing.T) {
 	})
 	assert.Len(t, got, 2)
 
-	var raw series
+	var raw pending
 	raw.Samples.Add(1, 1, 1, 1)
 	raw.Samples.Add(61, 2, 2, 1)
 	got = collectCall(t, func(y func(time.Time, float64) bool) {
@@ -101,11 +101,24 @@ func TestSampleIteratorsStop(t *testing.T) {
 		mixed.rangeValues(2, 2, 60, Sum, y)
 	})
 	assert.Equal(t, []float64{6}, got)
+
+	mixed = sampleData{
+		Buckets: []sampleBucket{
+			{Time: 1, Count: 1, Sum: 1, Min: 1, Max: 1, First: 1, Last: 1},
+			{Time: 61, Count: 1, Sum: 2, Min: 2, Max: 2, First: 2, Last: 2},
+		},
+	}
+	calls = 0
+	mixed.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
+		calls++
+		return false
+	})
+	assert.Equal(t, 1, calls)
 }
 
 func TestSampleState(t *testing.T) {
 	assert.Equal(t, uint64(10), bucketOf(10, 0))
-	var s series
+	var s pending
 	s.Merge(nil)
 	s.Compact(time.Now(), 0)
 
