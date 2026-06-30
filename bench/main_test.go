@@ -16,13 +16,22 @@ import (
 
 func TestCases(t *testing.T) {
 	cases := cases()
-	assert.Len(t, cases, 6)
+	names := make([]string, 0, len(cases))
 	for _, tc := range cases {
+		names = append(names, tc.name)
 		t.Run(tc.name, func(t *testing.T) {
 			tc.setup()(1)
 			assert.Equal(t, tc.name, tc.String())
 		})
 	}
+	assert.Equal(t, []string{
+		"samples/append",
+		"samples/range",
+		"samples/values",
+		"counters/append",
+		"counters/range",
+		"counters/values",
+	}, names)
 }
 
 func TestRun(t *testing.T) {

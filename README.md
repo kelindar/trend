@@ -104,15 +104,15 @@ import (
 
 ```text
 name             time/op   ops/s    allocs/op
-samples/set      54.5 ns   18.3M    0
-samples/range    7.3 us    137.9K   6
-counters/add     41.2 ns   24.3M    0
-counters/range   5.6 us    177.1K   5
-codec/marshal_10k 325.1 us 3.1K     5
-codec/decode_10k 149.8 us  6.7K     7
+samples/append   327.9 us  3.0K     10
+samples/range    177.9 us  5.6K     4
+samples/values   95.0 us   10.5K    4
+counters/append  286.4 us  3.5K     9
+counters/range   100.7 us  9.9K     4
+counters/values  78.6 us   12.7K    4
 ```
 
-Numbers are from local benchmarks on an Intel i7-13700K.
+Numbers are from local 10K element DB-backed benchmarks on an Intel i7-13700K.
 
 ## About
 

@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-type series struct {
+type series []byte
+
+type pending struct {
 	Samples  sampleData
 	Counters counterData
 }
@@ -44,33 +46,47 @@ type counterBucket struct {
 	Sum  uint64
 }
 
-func (s *series) Merge(delta *series) {
+func (p *pending) Merge(delta *pending) {
 	if delta == nil {
 		return
 	}
-	s.Samples.Merge(delta.Samples)
-	s.Counters.Merge(delta.Counters)
+	p.Samples.Merge(delta.Samples)
+	p.Counters.Merge(delta.Counters)
 }
 
-func (s *series) Append(delta *series) {
-	if delta == nil {
-		return
+func (p *pending) Reset() {
+	p.Samples.Reset()
+	p.Counters.Reset()
+}
+
+func (p *pending) Count() int {
+	if p == nil {
+		return 0
 	}
-	s.Samples.Append(delta.Samples)
-	s.Counters.Append(delta.Counters)
+	return p.Samples.count() + p.Counters.count()
 }
 
-func (s *series) Reset() {
-	s.Samples.Reset()
-	s.Counters.Reset()
+func (p *pending) appendable() bool {
+	if p == nil {
+		return true
+	}
+	return p.Samples.appendable() && p.Counters.appendable()
 }
 
-func (s *series) Compact(cutoff time.Time, span time.Duration) {
+func (p *pending) minTime() (uint64, bool) {
+	out, ok := p.Samples.minTime()
+	if v, has := p.Counters.minTime(); has && (!ok || v < out) {
+		return v, true
+	}
+	return out, ok
+}
+
+func (p *pending) Compact(cutoff time.Time, span time.Duration) {
 	if span <= 0 {
 		return
 	}
-	s.Samples.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
-	s.Counters.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
+	p.Samples.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
+	p.Counters.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
 }
 
 func bucketOf(t, span uint64) uint64 {
@@ -87,4 +103,22 @@ func sortedTimes[V any](m map[uint64]V) []uint64 {
 	}
 	slices.Sort(times)
 	return times
+}
+
+func strictlyIncreasing(data []uint64) bool {
+	for i := 1; i < len(data); i++ {
+		if data[i] <= data[i-1] {
+			return false
+		}
+	}
+	return true
+}
+
+func nondecreasing(data []uint64) bool {
+	for i := 1; i < len(data); i++ {
+		if data[i] < data[i-1] {
+			return false
+		}
+	}
+	return true
 }

@@ -49,10 +49,6 @@ func TestBuffer(t *testing.T) {
 	require.NoError(t, db.Flush(ctx))
 	assert.NotEmpty(t, store.data)
 
-	var delta series
-	delta.Samples.Add(1, 1, 1, 1)
-	require.NoError(t, db.write(ctx, "s:y", &delta))
-	require.NoError(t, db.write(ctx, "s:y", &delta))
 	require.NoError(t, db.writeSample(ctx, "s:z", 1, 1))
 	require.NoError(t, db.writeSample(ctx, "s:z", 2, 2))
 	require.NoError(t, db.writeCounter(ctx, "c:z", 1, 1))
@@ -102,6 +98,6 @@ func TestErrors(t *testing.T) {
 		db, _ := New(store)
 		store.data["s:x"] = []byte{99}
 		assert.Error(t, db.Samples("x").Set(ctx, time.Now(), 1))
-		assert.Error(t, db.merge(ctx, "s:x", &series{}))
+		assert.Error(t, db.merge(ctx, "s:x", &pending{}))
 	})
 }

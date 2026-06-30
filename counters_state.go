@@ -16,20 +16,47 @@ func (d *counterData) Add(t, replica, clock, value uint64) {
 	d.Value = append(d.Value, value)
 }
 
-func (d *counterData) Append(delta counterData) {
-	d.Time = append(d.Time, delta.Time...)
-	d.Replica = append(d.Replica, delta.Replica...)
-	d.Clock = append(d.Clock, delta.Clock...)
-	d.Value = append(d.Value, delta.Value...)
-	d.Buckets = append(d.Buckets, delta.Buckets...)
-}
-
 func (d *counterData) Reset() {
 	d.Time = d.Time[:0]
 	d.Replica = d.Replica[:0]
 	d.Clock = d.Clock[:0]
 	d.Value = d.Value[:0]
 	d.Buckets = d.Buckets[:0]
+}
+
+func (d counterData) count() int {
+	return len(d.Time) + len(d.Buckets)
+}
+
+func (d counterData) appendable() bool {
+	return nondecreasing(d.Time) && counterBucketsIncreasing(d.Buckets)
+}
+
+func (d counterData) minTime() (uint64, bool) {
+	var out uint64
+	var ok bool
+	for _, t := range d.Time {
+		if !ok || t < out {
+			out = t
+		}
+		ok = true
+	}
+	for _, b := range d.Buckets {
+		if !ok || b.Time < out {
+			out = b.Time
+		}
+		ok = true
+	}
+	return out, ok
+}
+
+func counterBucketsIncreasing(buckets []counterBucket) bool {
+	for i := 1; i < len(buckets); i++ {
+		if buckets[i].Time <= buckets[i-1].Time {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *counterData) Merge(delta counterData) {

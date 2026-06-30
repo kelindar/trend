@@ -13,11 +13,20 @@ import (
 	"github.com/klauspost/compress/s2"
 )
 
-const version = 2
+const (
+	version     = 4
+	segmentSize = 1024
+)
+
+const (
+	segmentSamples byte = iota + 1
+	segmentCounters
+	segmentSampleBuckets
+	segmentCounterBuckets
+)
 
 var (
 	encodeBuffers = sync.Pool{New: func() any { return new(codecBuffer) }}
-	decodeBuffers = sync.Pool{New: func() any { return new(codecBuffer) }}
 )
 
 var (
@@ -29,205 +38,207 @@ var (
 )
 
 type codecBuffer struct {
-	data []byte
+	raw []byte
+	zip []byte
 }
 
-func decode(b []byte) (*series, error) {
-	switch {
-	case len(b) == 0:
-		return &series{}, nil
-	case b[0] != version:
-		return nil, fmt.Errorf("trend: unsupported version %d", b[0])
-	}
-
-	size, err := s2.DecodedLen(b[1:])
-	if err != nil {
-		return nil, err
-	}
-	scratch := getDecodeBuffer(size)
-	defer putDecodeBuffer(scratch)
-
-	out, err := s2.Decode(scratch.data[:0], b[1:])
-	if err != nil {
-		return nil, err
-	}
-	return decodeSeries(out)
+type segment struct {
+	kind   byte
+	from   uint64
+	to     uint64
+	count  int
+	rawLen int
+	data   []byte
 }
 
-func (s *series) Marshal() ([]byte, error) {
+func decode(b []byte) (*pending, error) {
+	return series(b).pending()
+}
+
+func (p *pending) marshal() ([]byte, error) {
+	return series(nil).append(p)
+}
+
+func (s series) append(delta *pending) ([]byte, error) {
+	if delta == nil || delta.Count() == 0 {
+		return append([]byte(nil), s...), s.valid()
+	}
+	if err := delta.valid(); err != nil {
+		return nil, err
+	}
+	appendable := delta.appendable()
+	if len(s) == 0 {
+		if !appendable {
+			current := pending{}
+			current.Merge(delta)
+			return current.marshal()
+		}
+		return delta.appendTo(nil)
+	}
 	if err := s.valid(); err != nil {
 		return nil, err
 	}
-
-	buffer := encodeBuffers.Get().(*codecBuffer)
-	buffer.data = appendSeries(buffer.data[:0], s)
-	encoded := buffer.data
-	dst := make([]byte, s2.MaxEncodedLen(len(encoded))+1)
-	dst[0] = version
-	out := s2.Encode(dst[1:], encoded)
-	putEncodeBuffer(buffer)
-	return dst[:len(out)+1], nil
+	if delta.Count() >= segmentSize && appendable && s.canAppend(delta) {
+		out := append([]byte(nil), s...)
+		return delta.appendTo(out)
+	}
+	current, err := s.pending()
+	if err != nil {
+		return nil, err
+	}
+	current.Merge(delta)
+	return current.marshal()
 }
 
-func (s *series) valid() error {
-	if len(s.Samples.Time) != len(s.Samples.Data) ||
-		len(s.Samples.Time) != len(s.Samples.Clock) ||
-		len(s.Samples.Time) != len(s.Samples.Replica) ||
-		len(s.Counters.Time) != len(s.Counters.Replica) ||
-		len(s.Counters.Time) != len(s.Counters.Clock) ||
-		len(s.Counters.Time) != len(s.Counters.Value) {
+func (s series) canAppend(delta *pending) bool {
+	next, ok := delta.minTime()
+	if !ok {
+		return true
+	}
+	last, ok := s.maxTime()
+	return !ok || next > last
+}
+
+func (s series) valid() error {
+	return s.scan(func(segment) bool { return true })
+}
+
+func (s series) maxTime() (uint64, bool) {
+	var out uint64
+	var ok bool
+	_ = s.scan(func(seg segment) bool {
+		if !ok || seg.to > out {
+			out = seg.to
+		}
+		ok = true
+		return true
+	})
+	return out, ok
+}
+
+func (s series) pending() (*pending, error) {
+	var out pending
+	var decodeErr error
+	err := s.scan(func(seg segment) bool {
+		raw, err := seg.decodeInto(nil)
+		if err != nil {
+			decodeErr = err
+			return false
+		}
+		switch seg.kind {
+		case segmentSamples:
+			decodeErr = decodeSamples(raw, seg.count, &out.Samples)
+		case segmentCounters:
+			decodeErr = decodeCounters(raw, seg.count, &out.Counters)
+		case segmentSampleBuckets:
+			decodeErr = decodeSampleBuckets(raw, seg.count, &out.Samples)
+		case segmentCounterBuckets:
+			decodeErr = decodeCounterBuckets(raw, seg.count, &out.Counters)
+		default:
+			decodeErr = errVarintCodec
+		}
+		if decodeErr != nil {
+			out = pending{}
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if decodeErr != nil {
+		return nil, decodeErr
+	}
+	return &out, nil
+}
+
+func (p *pending) appendTo(dst []byte) ([]byte, error) {
+	if len(dst) == 0 {
+		dst = append(dst, version)
+	} else if dst[0] != version {
+		return nil, fmt.Errorf("trend: unsupported version %d", dst[0])
+	}
+
+	buf := encodeBuffers.Get().(*codecBuffer)
+	defer putEncodeBuffer(buf)
+
+	dst = appendSampleBucketSegments(dst, p.Samples.Buckets, buf)
+	dst = appendSampleSegments(dst, p.Samples, buf)
+	dst = appendCounterBucketSegments(dst, p.Counters.Buckets, buf)
+	return appendCounterSegments(dst, p.Counters, buf), nil
+}
+
+func (p *pending) valid() error {
+	if p == nil {
+		return nil
+	}
+	if len(p.Samples.Time) != len(p.Samples.Data) ||
+		len(p.Samples.Time) != len(p.Samples.Clock) ||
+		len(p.Samples.Time) != len(p.Samples.Replica) ||
+		len(p.Counters.Time) != len(p.Counters.Replica) ||
+		len(p.Counters.Time) != len(p.Counters.Clock) ||
+		len(p.Counters.Time) != len(p.Counters.Value) {
 		return errShapeCodec
 	}
 	return nil
 }
 
-func (s *series) alloc(samples, sampleBuckets, counters, counterBuckets int) {
-	if samples+counters > 0 {
-		values := make([]uint64, samples*3+counters*4)
-		offset := 0
-		if samples > 0 {
-			s.Samples.Time = values[:samples:samples]
-			s.Samples.Clock = values[samples : 2*samples : 2*samples]
-			s.Samples.Replica = values[2*samples : 3*samples : 3*samples]
-			offset = 3 * samples
+func (s series) scan(yield func(segment) bool) error {
+	if len(s) == 0 {
+		return nil
+	}
+	if s[0] != version {
+		return fmt.Errorf("trend: unsupported version %d", s[0])
+	}
+	r := codecReader{data: s[1:]}
+	for len(r.data) > 0 && r.err == nil {
+		seg := segment{
+			kind:   r.byte(),
+			from:   r.uvarint(),
+			to:     r.uvarint(),
+			count:  r.count(),
+			rawLen: r.count(),
 		}
-		if counters > 0 {
-			s.Counters.Time = values[offset : offset+counters : offset+counters]
-			offset += counters
-			s.Counters.Replica = values[offset : offset+counters : offset+counters]
-			offset += counters
-			s.Counters.Clock = values[offset : offset+counters : offset+counters]
-			offset += counters
-			s.Counters.Value = values[offset : offset+counters : offset+counters]
+		zipLen := r.count()
+		seg.data = r.bytes(zipLen)
+		if r.err != nil {
+			break
+		}
+		if seg.count <= 0 || seg.count > segmentSize || seg.from > seg.to {
+			return errLargeCodec
+		}
+		switch seg.kind {
+		case segmentSamples, segmentCounters, segmentSampleBuckets, segmentCounterBuckets:
+		default:
+			return errVarintCodec
+		}
+		if !yield(seg) {
+			return nil
 		}
 	}
-	if samples > 0 {
-		s.Samples.Data = make([]float64, samples)
-	}
-	if sampleBuckets > 0 {
-		s.Samples.Buckets = make([]sampleBucket, sampleBuckets)
-	}
-	if counterBuckets > 0 {
-		s.Counters.Buckets = make([]counterBucket, counterBuckets)
-	}
+	return r.err
 }
 
-func appendSeries(dst []byte, s *series) []byte {
-	dst = appendUvarint(dst, uint64(len(s.Samples.Time)))
-	dst = appendUvarint(dst, uint64(len(s.Samples.Buckets)))
-	dst = appendUvarint(dst, uint64(len(s.Counters.Time)))
-	dst = appendUvarint(dst, uint64(len(s.Counters.Buckets)))
-	dst = appendDelta(dst, s.Samples.Time)
-	dst = appendFloatXor(dst, s.Samples.Data)
-	dst = appendDelta(dst, s.Samples.Clock)
-	dst = appendDelta(dst, s.Samples.Replica)
-	dst = appendSampleBuckets(dst, s.Samples.Buckets)
-	dst = appendDelta(dst, s.Counters.Time)
-	dst = appendDelta(dst, s.Counters.Replica)
-	dst = appendDelta(dst, s.Counters.Clock)
-	dst = appendDelta(dst, s.Counters.Value)
-	return appendCounterBuckets(dst, s.Counters.Buckets)
+func (seg segment) decodeInto(dst []byte) ([]byte, error) {
+	raw, err := s2.Decode(dst[:0], seg.data)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != seg.rawLen {
+		return nil, errShortCodec
+	}
+	return raw, nil
 }
 
-func decodeSeries(data []byte) (*series, error) {
-	r := codecReader{data: data}
-	samples := r.count()
-	sampleBuckets := r.count()
-	counters := r.count()
-	counterBuckets := r.count()
-	fields, ok := minFields(samples, sampleBuckets, counters, counterBuckets)
-	switch {
-	case r.err != nil:
-		return nil, r.err
-	case !ok:
-		return nil, errLargeCodec
-	case !r.hasFields(fields):
-		return nil, r.err
-	}
-
-	out := new(series)
-	out.alloc(samples, sampleBuckets, counters, counterBuckets)
-	r.delta(out.Samples.Time)
-	r.floatXor(out.Samples.Data)
-	r.delta(out.Samples.Clock)
-	r.delta(out.Samples.Replica)
-	r.sampleBuckets(out.Samples.Buckets)
-	r.delta(out.Counters.Time)
-	r.delta(out.Counters.Replica)
-	r.delta(out.Counters.Clock)
-	r.delta(out.Counters.Value)
-	r.counterBuckets(out.Counters.Buckets)
-	switch {
-	case r.err != nil:
-		return nil, r.err
-	case len(r.data) != 0:
-		return nil, errLongCodec
-	}
-	return out, nil
-}
-
-func minFields(samples, sampleBuckets, counters, counterBuckets int) (int, bool) {
-	total := 0
-	for _, v := range [...]struct {
-		count  int
-		fields int
-	}{
-		{samples, 4},
-		{sampleBuckets, 7},
-		{counters, 4},
-		{counterBuckets, 2},
-	} {
-		if v.count > (int(^uint(0)>>1)-total)/v.fields {
-			return 0, false
-		}
-		total += v.count * v.fields
-	}
-	return total, true
-}
-
-func appendDelta(dst []byte, data []uint64) []byte {
-	var prev uint64
-	for _, v := range data {
-		dst = appendUvarint(dst, v-prev)
-		prev = v
-	}
-	return dst
-}
-
-func appendFloatXor(dst []byte, data []float64) []byte {
-	var prev uint64
-	for _, v := range data {
-		var current uint64
-		dst, current = appendFloat(dst, v, prev)
-		prev = current
-	}
-	return dst
-}
-
-func appendSampleBuckets(dst []byte, buckets []sampleBucket) []byte {
-	var prevTime, prevCount uint64
-	var prevSum, prevMin, prevMax, prevFirst, prevLast uint64
-	for _, b := range buckets {
-		dst = appendUvarint(dst, b.Time-prevTime)
-		dst = appendUvarint(dst, b.Count-prevCount)
-		dst, prevSum = appendFloat(dst, b.Sum, prevSum)
-		dst, prevMin = appendFloat(dst, b.Min, prevMin)
-		dst, prevMax = appendFloat(dst, b.Max, prevMax)
-		dst, prevFirst = appendFloat(dst, b.First, prevFirst)
-		dst, prevLast = appendFloat(dst, b.Last, prevLast)
-		prevTime, prevCount = b.Time, b.Count
-	}
-	return dst
-}
-
-func appendCounterBuckets(dst []byte, buckets []counterBucket) []byte {
-	var prevTime, prevSum uint64
-	for _, b := range buckets {
-		dst = appendUvarint(dst, b.Time-prevTime)
-		dst = appendUvarint(dst, b.Sum-prevSum)
-		prevTime, prevSum = b.Time, b.Sum
-	}
-	return dst
+func appendSegment(dst []byte, kind byte, from, to uint64, count int, raw []byte, buf *codecBuffer) []byte {
+	buf.zip = s2.Encode(buf.zip[:0], raw)
+	dst = append(dst, kind)
+	dst = appendUvarint(dst, from)
+	dst = appendUvarint(dst, to)
+	dst = appendUvarint(dst, uint64(count))
+	dst = appendUvarint(dst, uint64(len(raw)))
+	dst = appendUvarint(dst, uint64(len(buf.zip)))
+	return append(dst, buf.zip...)
 }
 
 func appendFloat(dst []byte, v float64, prev uint64) ([]byte, uint64) {
@@ -248,12 +259,27 @@ type codecReader struct {
 	err  error
 }
 
-func (r *codecReader) hasFields(n int) bool {
+func (r *codecReader) byte() byte {
+	if r.err != nil {
+		return 0
+	}
+	if len(r.data) == 0 {
+		r.err = errShortCodec
+		return 0
+	}
+	out := r.data[0]
+	r.data = r.data[1:]
+	return out
+}
+
+func (r *codecReader) bytes(n int) []byte {
 	if n < 0 || n > len(r.data) {
 		r.err = errShortCodec
-		return false
+		return nil
 	}
-	return true
+	out := r.data[:n:n]
+	r.data = r.data[n:]
+	return out
 }
 
 func (r *codecReader) count() int {
@@ -284,37 +310,6 @@ func (r *codecReader) floatXor(dst []float64) {
 	}
 }
 
-func (r *codecReader) sampleBuckets(dst []sampleBucket) {
-	var prevTime, prevCount uint64
-	var prevSum, prevMin, prevMax, prevFirst, prevLast uint64
-	for i := range dst {
-		b := &dst[i]
-		prevTime += r.uvarint()
-		prevCount += r.uvarint()
-		prevSum ^= r.uvarint()
-		prevMin ^= r.uvarint()
-		prevMax ^= r.uvarint()
-		prevFirst ^= r.uvarint()
-		prevLast ^= r.uvarint()
-		b.Time = prevTime
-		b.Count = prevCount
-		b.Sum = math.Float64frombits(bits.Reverse64(prevSum))
-		b.Min = math.Float64frombits(bits.Reverse64(prevMin))
-		b.Max = math.Float64frombits(bits.Reverse64(prevMax))
-		b.First = math.Float64frombits(bits.Reverse64(prevFirst))
-		b.Last = math.Float64frombits(bits.Reverse64(prevLast))
-	}
-}
-
-func (r *codecReader) counterBuckets(dst []counterBucket) {
-	var prevTime, prevSum uint64
-	for i := range dst {
-		prevTime += r.uvarint()
-		prevSum += r.uvarint()
-		dst[i] = counterBucket{Time: prevTime, Sum: prevSum}
-	}
-}
-
 func (r *codecReader) uvarint() uint64 {
 	if r.err != nil {
 		return 0
@@ -342,17 +337,4 @@ func (r *codecReader) uvarint() uint64 {
 
 func putEncodeBuffer(buf *codecBuffer) {
 	encodeBuffers.Put(buf)
-}
-
-func getDecodeBuffer(size int) *codecBuffer {
-	buf := decodeBuffers.Get().(*codecBuffer)
-	if cap(buf.data) < size {
-		buf.data = make([]byte, size)
-	}
-	buf.data = buf.data[:size]
-	return buf
-}
-
-func putDecodeBuffer(buf *codecBuffer) {
-	decodeBuffers.Put(buf)
 }

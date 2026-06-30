@@ -12,7 +12,7 @@ import (
 )
 
 func TestMerge(t *testing.T) {
-	var a, b series
+	var a, b pending
 	a.Samples.Add(1, 1, 1, 1)
 	b.Samples.Add(1, 2, 2, 1)
 	b.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 2, Min: 2, Max: 2, First: 2, Last: 2}}
@@ -22,7 +22,7 @@ func TestMerge(t *testing.T) {
 	got := a.Samples.Buckets[0]
 	assert.Equal(t, sampleBucket{Time: 10, Count: 2, Sum: 6, Min: 2, Max: 4, First: 4, Last: 2}, got)
 
-	a, b = series{}, series{}
+	a, b = pending{}, pending{}
 	a.Counters.Add(1, 1, 1, 2)
 	b.Counters.Add(1, 1, 1, 2)
 	a.Merge(&b)
@@ -32,24 +32,81 @@ func TestMerge(t *testing.T) {
 	assert.Equal(t, []float64{2}, values)
 }
 
-func TestSeriesAppend(t *testing.T) {
-	var a, b series
-	b.Samples.Add(1, 1, 1, 1)
-	b.Samples.Buckets = []sampleBucket{{Time: 1, Count: 1, Sum: 1}}
-	b.Counters.Add(1, 1, 1, 1)
-	b.Counters.Buckets = []counterBucket{{Time: 1, Sum: 1}}
-	a.Append(nil)
-	a.Append(&b)
-	assert.Len(t, a.Samples.Time, 1)
-	assert.Len(t, a.Samples.Buckets, 1)
-	assert.Len(t, a.Counters.Time, 1)
-	assert.Len(t, a.Counters.Buckets, 1)
+func TestAppend(t *testing.T) {
+	t.Run("if after", func(t *testing.T) {
+		var current pending
+		current.Samples.Add(1, 1, 1, 1)
+		raw, err := current.marshal()
+		require.NoError(t, err)
+
+		var next pending
+		for i := range uint64(segmentSize) {
+			next.Samples.Add(2+i, float64(2+i), 2+i, 1)
+		}
+		raw, err = series(raw).append(&next)
+		require.NoError(t, err)
+		decoded, err := decode(raw)
+		require.NoError(t, err)
+		got := collectCall(t, func(y func(time.Time, float64) bool) {
+			decoded.Samples.values(1, 2, y)
+		})
+		assert.Equal(t, []float64{1, 2}, got)
+
+		var overlap pending
+		overlap.Samples.Add(2, 9, 9, 1)
+		raw, err = series(raw).append(&overlap)
+		require.NoError(t, err)
+		decoded, err = decode(raw)
+		require.NoError(t, err)
+		got = collectCall(t, func(y func(time.Time, float64) bool) {
+			decoded.Samples.values(2, 2, y)
+		})
+		assert.Equal(t, []float64{9}, got)
+	})
+
+	t.Run("merges unordered large delta", func(t *testing.T) {
+		var current pending
+		current.Samples.Add(0, 0, 1, 1)
+		raw, err := current.marshal()
+		require.NoError(t, err)
+
+		var next pending
+		for i := range uint64(segmentSize) {
+			t := uint64(segmentSize) - i
+			next.Samples.Add(t, float64(t), i+2, 1)
+			next.Counters.Add(t, 1, i+2, 1)
+		}
+		next.Samples.Add(10, 99, segmentSize+3, 1)
+
+		raw, err = series(raw).append(&next)
+		require.NoError(t, err)
+		decoded, err := decode(raw)
+		require.NoError(t, err)
+
+		require.Len(t, decoded.Samples.Time, segmentSize+1)
+		for i := 1; i < len(decoded.Samples.Time); i++ {
+			assert.Greater(t, decoded.Samples.Time[i], decoded.Samples.Time[i-1])
+		}
+		got := collectCall(t, func(y func(time.Time, float64) bool) {
+			decoded.Samples.values(10, 10, y)
+		})
+		assert.Equal(t, []float64{99}, got)
+
+		require.Len(t, decoded.Counters.Time, segmentSize)
+		for i := 1; i < len(decoded.Counters.Time); i++ {
+			assert.GreaterOrEqual(t, decoded.Counters.Time[i], decoded.Counters.Time[i-1])
+		}
+		got = collectCall(t, func(y func(time.Time, float64) bool) {
+			decoded.Counters.values(10, 10, y)
+		})
+		assert.Equal(t, []float64{1}, got)
+	})
 }
 
 func FuzzSampleMerge(f *testing.F) {
 	f.Add(uint64(1), float64(1), uint64(1), uint64(2), float64(2), uint64(2))
 	f.Fuzz(func(t *testing.T, ts uint64, v1 float64, c1 uint64, r uint64, v2 float64, c2 uint64) {
-		var a, b, ab, ba series
+		var a, b, ab, ba pending
 		a.Samples.Add(ts, v1, c1, r)
 		b.Samples.Add(ts, v2, c2, r+1)
 		ab.Merge(&a)
@@ -67,7 +124,7 @@ func FuzzSampleMerge(f *testing.F) {
 func FuzzCounterMerge(f *testing.F) {
 	f.Add(uint64(1), uint64(1), uint64(2), uint64(3))
 	f.Fuzz(func(t *testing.T, ts, replica, clock, value uint64) {
-		var a, b, c, left, right series
+		var a, b, c, left, right pending
 		a.Counters.Add(ts, replica, clock, value)
 		b.Counters.Add(ts, replica+1, clock+1, value+1)
 		c.Counters.Add(ts+1, replica, clock+2, value+2)

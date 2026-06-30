@@ -12,7 +12,7 @@ import (
 )
 
 func TestCounters(t *testing.T) {
-	var s series
+	var s pending
 	s.Counters.Add(1, 1, 1, 2)
 	s.Counters.Buckets = []counterBucket{{Time: 10, Sum: 3}}
 	got := collectCall(t, func(y func(time.Time, float64) bool) {
@@ -28,7 +28,7 @@ func TestCounters(t *testing.T) {
 	})
 	assert.Equal(t, []float64{2, 3}, got)
 
-	var raw series
+	var raw pending
 	raw.Counters.Add(1, 1, 1, 1)
 	raw.Counters.Add(61, 1, 2, 2)
 	got = collectCall(t, func(y func(time.Time, float64) bool) {
@@ -57,7 +57,8 @@ func TestCounterIteratorsStop(t *testing.T) {
 	})
 	assert.Equal(t, 1, calls)
 	calls = 0
-	counterData{Time: []uint64{1}, Value: []uint64{1}}.values(1, 1, func(time.Time, float64) bool {
+	one := counterData{Time: []uint64{1}, Value: []uint64{1}}
+	one.values(1, 1, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -75,11 +76,13 @@ func TestCounterIteratorsStop(t *testing.T) {
 	})
 	assert.Equal(t, []float64{9}, got)
 	got = collectCall(t, func(y func(time.Time, float64) bool) {
-		counterData{Time: []uint64{2}, Value: []uint64{1}}.values(1, 1, y)
+		one := counterData{Time: []uint64{2}, Value: []uint64{1}}
+		one.values(1, 1, y)
 	})
 	assert.Empty(t, got)
 	got = collectCall(t, func(y func(time.Time, float64) bool) {
-		counterData{Buckets: []counterBucket{{Time: 2, Sum: 1}}}.values(1, 1, y)
+		one := counterData{Buckets: []counterBucket{{Time: 2, Sum: 1}}}
+		one.values(1, 1, y)
 	})
 	assert.Empty(t, got)
 
