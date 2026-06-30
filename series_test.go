@@ -27,8 +27,8 @@ func TestMerge(t *testing.T) {
 	a.Counters.Add(1, 1, 1, 2)
 	b.Counters.Add(1, 1, 1, 2)
 	a.Merge(&b)
-	values := a.Counters.values(1, 1)
-	if len(values) != 1 || !reflect.DeepEqual([]float64{values[0].value}, []float64{2}) {
+	values := collect(t, a.Counters.values(1, 1))
+	if len(values) != 1 || !reflect.DeepEqual(values, []float64{2}) {
 		t.Fatalf("counter merge: %v", values)
 	}
 }
@@ -79,11 +79,11 @@ func FuzzCounterMerge(f *testing.F) {
 		right.Merge(&b)
 		right.Merge(&c)
 		right.Merge(&a)
-		if len(left.Counters.values(0, ^uint64(0))) != len(right.Counters.values(0, ^uint64(0))) {
+		if len(collect(t, left.Counters.values(0, ^uint64(0)))) != len(collect(t, right.Counters.values(0, ^uint64(0)))) {
 			t.Fatalf("counter merge not associative/commutative")
 		}
 		left.Merge(&a)
-		if len(left.Counters.values(ts, ts)) == 0 {
+		if len(collect(t, left.Counters.values(ts, ts))) == 0 {
 			t.Fatalf("counter merge lost value")
 		}
 	})
