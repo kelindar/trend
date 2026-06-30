@@ -6,10 +6,7 @@ package trend
 import (
 	"context"
 	"iter"
-	"sort"
 	"time"
-
-	"github.com/kelindar/binary/sorted"
 )
 
 // Samples writes and reads float64 samples.
@@ -29,8 +26,10 @@ func (s Samples) Values(ctx context.Context, from, to time.Time) (iter.Seq2[time
 	if err != nil {
 		return nil, err
 	}
-	items := data.Samples.values(uint64(from.Unix()), uint64(to.Unix()))
-	return points(items), nil
+	fromUnix, toUnix := uint64(from.Unix()), uint64(to.Unix())
+	return func(yield func(time.Time, float64) bool) {
+		data.Samples.values(fromUnix, toUnix, yield)
+	}, nil
 }
 
 // Range returns bucketed aggregate values.
@@ -39,8 +38,10 @@ func (s Samples) Range(ctx context.Context, from, to time.Time, span time.Durati
 	if err != nil {
 		return nil, err
 	}
-	items := data.Samples.rangeValues(uint64(from.Unix()), uint64(to.Unix()), uint64(span.Seconds()), agg)
-	return points(items), nil
+	fromUnix, toUnix := uint64(from.Unix()), uint64(to.Unix())
+	return func(yield func(time.Time, float64) bool) {
+		data.Samples.rangeValues(fromUnix, toUnix, uint64(span.Seconds()), agg, yield)
+	}, nil
 }
 
 // Compact compacts this series.
@@ -48,93 +49,96 @@ func (s Samples) Compact(ctx context.Context) error {
 	return s.db.compact(ctx, s.key)
 }
 
-func (d sampleData) values(from, to uint64) []point {
-	out := make([]point, 0, len(d.Time)+len(d.Buckets))
-	for _, b := range d.Buckets {
-		if inWindow(b.Time, from, to) {
-			out = append(out, point{
-				at:    time.Unix(int64(b.Time), 0),
-				value: b.Sum / float64(b.Count),
-			})
-		}
+func (d sampleData) values(from, to uint64, yield func(time.Time, float64) bool) {
+	bucket, item := 0, 0
+	for bucket < len(d.Buckets) && d.Buckets[bucket].Time < from {
+		bucket++
 	}
-	raw := sorted.TimeSeries{Time: d.Time, Data: d.Data}
-	for i, t := range raw.Time {
-		if inWindow(t, from, to) {
-			out = append(out, point{
-				at:    time.Unix(int64(t), 0),
-				value: raw.Data[i],
-			})
-		}
+	for item < len(d.Time) && d.Time[item] < from {
+		item++
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].at.Before(out[j].at) })
-	return out
-}
-
-func (d sampleData) rangeValues(from, to, span uint64, agg Agg) []point {
-	if span == 0 {
-		return d.values(from, to)
-	}
-	if len(d.Buckets) == 0 {
-		var out []point
-		var current uint64
-		var f fold
-		raw := sorted.TimeSeries{Time: d.Time, Data: d.Data}
-		flush := func() {
-			if f.count == 0 {
+	for bucket < len(d.Buckets) || item < len(d.Time) {
+		if item >= len(d.Time) || bucket < len(d.Buckets) && d.Buckets[bucket].Time <= d.Time[item] {
+			b := d.Buckets[bucket]
+			if b.Time > to || !yield(time.Unix(int64(b.Time), 0), b.Sum/float64(b.Count)) {
 				return
 			}
-			out = append(out, point{
-				at:    time.Unix(int64(current), 0),
-				value: f.value(agg),
-			})
+			bucket++
+			continue
 		}
-		for i, t := range raw.Time {
-			if !inWindow(t, from, to) {
-				continue
+		t := d.Time[item]
+		if t > to || !yield(time.Unix(int64(t), 0), d.Data[item]) {
+			return
+		}
+		item++
+	}
+}
+
+func (d sampleData) rangeValues(from, to, span uint64, agg Agg, yield func(time.Time, float64) bool) {
+	if span == 0 {
+		d.values(from, to, yield)
+		return
+	}
+	if len(d.Buckets) == 0 {
+		var current uint64
+		var f fold
+		i := 0
+		for i < len(d.Time) && d.Time[i] < from {
+			i++
+		}
+		for ; i < len(d.Time); i++ {
+			t := d.Time[i]
+			if t > to {
+				break
 			}
 			k := bucketOf(t, span)
 			if f.count > 0 && k != current {
-				flush()
+				if !yield(time.Unix(int64(current), 0), f.Value(agg)) {
+					return
+				}
 				f = fold{}
 			}
 			current = k
-			f.add(raw.Data[i])
+			f.Add(d.Data[i])
 		}
-		flush()
-		return out
-	}
-	folds := make(map[uint64]*fold)
-	for _, b := range d.Buckets {
-		if inWindow(b.Time, from, to) {
-			k := bucketOf(b.Time, span)
-			if folds[k] == nil {
-				folds[k] = &fold{}
-			}
-			folds[k].merge(b)
+		if f.count > 0 {
+			yield(time.Unix(int64(current), 0), f.Value(agg))
 		}
+		return
 	}
-	raw := sorted.TimeSeries{Time: d.Time, Data: d.Data}
-	for i, t := range raw.Time {
-		if inWindow(t, from, to) {
-			k := bucketOf(t, span)
-			if folds[k] == nil {
-				folds[k] = &fold{}
-			}
-			folds[k].add(raw.Data[i])
-		}
-	}
-	times := sortedTimes(folds)
-	out := make([]point, 0, len(times))
-	for _, t := range times {
-		out = append(out, point{
-			at:    time.Unix(int64(t), 0),
-			value: folds[t].value(agg),
-		})
-	}
-	return out
-}
 
-func inWindow(t, from, to uint64) bool {
-	return t >= from && t <= to
+	bucket, item := 0, 0
+	for bucket < len(d.Buckets) && d.Buckets[bucket].Time < from {
+		bucket++
+	}
+	for item < len(d.Time) && d.Time[item] < from {
+		item++
+	}
+
+	for {
+		hasBucket := bucket < len(d.Buckets) && d.Buckets[bucket].Time <= to
+		hasItem := item < len(d.Time) && d.Time[item] <= to
+		if !hasBucket && !hasItem {
+			return
+		}
+		var current uint64
+		if hasItem {
+			current = bucketOf(d.Time[item], span)
+		}
+		if !hasItem || hasBucket && bucketOf(d.Buckets[bucket].Time, span) < current {
+			current = bucketOf(d.Buckets[bucket].Time, span)
+		}
+		var f fold
+		for bucket < len(d.Buckets) && d.Buckets[bucket].Time <= to && bucketOf(d.Buckets[bucket].Time, span) == current {
+			f.Merge(d.Buckets[bucket])
+			bucket++
+		}
+		for item < len(d.Time) && d.Time[item] <= to && bucketOf(d.Time[item], span) == current {
+			f.Add(d.Data[item])
+			item++
+		}
+		if !yield(time.Unix(int64(current), 0), f.Value(agg)) {
+			return
+		}
+	}
 }

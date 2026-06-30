@@ -25,7 +25,7 @@ type fold struct {
 	last  float64
 }
 
-func (f *fold) add(v float64) {
+func (f *fold) Add(v float64) {
 	if f.count == 0 {
 		f.min, f.max, f.first = v, v, v
 	}
@@ -40,7 +40,7 @@ func (f *fold) add(v float64) {
 	f.last = v
 }
 
-func (f *fold) merge(b sampleBucket) {
+func (f *fold) Merge(b sampleBucket) {
 	if b.Count == 0 {
 		return
 	}
@@ -58,7 +58,7 @@ func (f *fold) merge(b sampleBucket) {
 	f.last = b.Last
 }
 
-func (f fold) value(agg Agg) float64 {
+func (f fold) Value(agg Agg) float64 {
 	switch agg {
 	case Count:
 		return float64(f.count)

@@ -5,6 +5,7 @@ package trend
 
 import (
 	"context"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,24 +15,15 @@ import (
 
 // DB stores time-series samples and counters.
 type DB struct {
-	store Store
-
-	replica uint64
-	clock   atomic.Uint64
-
-	cache *bigcache.BigCache
-
-	flushEvery time.Duration
-	pendingMu  sync.Mutex
-	pending    map[string]*series
-
-	seen sync.Map
-
+	store         Store
+	replica       uint64
+	clock         atomic.Uint64
+	cache         *bigcache.BigCache
+	flushEvery    time.Duration
+	seen          sync.Map
+	buffer        *buffer
 	done          context.CancelFunc
-	compactAfter  time.Duration
-	compactSpan   time.Duration
-	compactEvery  time.Duration
-	compactJitter time.Duration
+	compactor     compactor
 }
 
 // Open opens a registered store URI.
@@ -46,10 +38,9 @@ func Open(uri string, opts ...Option) (*DB, error) {
 // New creates a DB over an existing store.
 func New(store Store, opts ...Option) (*DB, error) {
 	db := &DB{
-		store:        store,
-		replica:      defaultReplica(),
-		compactAfter: 24 * time.Hour,
-		compactSpan:  time.Hour,
+		store:   store,
+		replica: defaultReplica(),
+		compactor: compactor{after: 24 * time.Hour, span: time.Hour},
 	}
 	for _, opt := range opts {
 		if err := opt(db); err != nil {
@@ -57,14 +48,14 @@ func New(store Store, opts ...Option) (*DB, error) {
 			return nil, err
 		}
 	}
-	if db.flushEvery > 0 || db.compactEvery > 0 {
+	if db.flushEvery > 0 || db.compactor.every > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
 		db.done = cancel
 		if db.flushEvery > 0 {
-			db.pending = make(map[string]*series)
+			db.buffer = &buffer{items: make(map[string]*series)}
 			go db.flushLoop(ctx)
 		}
-		if db.compactEvery > 0 {
+		if db.compactor.every > 0 {
 			go db.compactLoop(ctx)
 		}
 	}
@@ -99,16 +90,11 @@ func (db *DB) Close() error {
 
 // Flush writes buffered deltas.
 func (db *DB) Flush(ctx context.Context) error {
-	if db.pending == nil {
+	if db.buffer == nil {
 		return nil
 	}
 
-	db.pendingMu.Lock()
-	pending := db.pending
-	db.pending = make(map[string]*series)
-	db.pendingMu.Unlock()
-
-	for key, delta := range pending {
+	for key, delta := range db.buffer.flush() {
 		if err := db.merge(ctx, key, delta); err != nil {
 			return err
 		}
@@ -135,20 +121,15 @@ func (db *DB) merge(ctx context.Context, key string, delta *series) error {
 		if err != nil {
 			return nil, err
 		}
-		current.merge(delta)
-		return current.marshal()
+		current.Merge(delta)
+		return current.Marshal()
 	})
 }
 
 func (db *DB) write(ctx context.Context, key string, delta *series) error {
 	db.seen.Store(key, struct{}{})
-	if db.pending != nil {
-		db.pendingMu.Lock()
-		if db.pending[key] == nil {
-			db.pending[key] = &series{}
-		}
-		db.pending[key].append(delta)
-		db.pendingMu.Unlock()
+	if db.buffer != nil {
+		db.buffer.append(key, delta)
 		db.dropCache(key)
 		return nil
 	}
@@ -161,37 +142,27 @@ func (db *DB) write(ctx context.Context, key string, delta *series) error {
 
 func (db *DB) writeSample(ctx context.Context, key string, at uint64, value float64) error {
 	clock := db.clock.Add(1)
-	if db.pending != nil {
+	if db.buffer != nil {
 		db.seen.Store(key, struct{}{})
-		db.pendingMu.Lock()
-		if db.pending[key] == nil {
-			db.pending[key] = &series{}
-		}
-		db.pending[key].Samples.add(at, value, clock, db.replica)
-		db.pendingMu.Unlock()
+		db.buffer.addSample(key, at, value, clock, db.replica)
 		db.dropCache(key)
 		return nil
 	}
 	var delta series
-	delta.Samples.add(at, value, clock, db.replica)
+	delta.Samples.Add(at, value, clock, db.replica)
 	return db.write(ctx, key, &delta)
 }
 
 func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) error {
 	clock := db.clock.Add(1)
-	if db.pending != nil {
+	if db.buffer != nil {
 		db.seen.Store(key, struct{}{})
-		db.pendingMu.Lock()
-		if db.pending[key] == nil {
-			db.pending[key] = &series{}
-		}
-		db.pending[key].Counters.add(at, db.replica, clock, value)
-		db.pendingMu.Unlock()
+		db.buffer.addCounter(key, at, db.replica, clock, value)
 		db.dropCache(key)
 		return nil
 	}
 	var delta series
-	delta.Counters.add(at, db.replica, clock, value)
+	delta.Counters.Add(at, db.replica, clock, value)
 	return db.write(ctx, key, &delta)
 }
 
@@ -215,10 +186,8 @@ func (db *DB) load(ctx context.Context, key string) (*series, error) {
 	if err != nil {
 		return nil, err
 	}
-	if db.pending != nil {
-		db.pendingMu.Lock()
-		out.merge(db.pending[key])
-		db.pendingMu.Unlock()
+	if db.buffer != nil {
+		db.buffer.mergeInto(key, out)
 	}
 	return out, nil
 }
@@ -231,3 +200,49 @@ func (db *DB) dropCache(key string) {
 
 func sampleKey(key string) string  { return "s:" + key }
 func counterKey(key string) string { return "c:" + key }
+
+// -----------------------------------------------------------------------------
+
+type buffer struct {
+	mu    sync.Mutex
+	items map[string]*series
+}
+
+func (b *buffer) flush() map[string]*series {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	items := maps.Clone(b.items)
+	clear(b.items)
+	return items
+}
+
+func (b *buffer) append(key string, delta *series) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.series(key).Append(delta)
+}
+
+func (b *buffer) addSample(key string, at uint64, value float64, clock, replica uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.series(key).Samples.Add(at, value, clock, replica)
+}
+
+func (b *buffer) addCounter(key string, at, replica, clock, value uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.series(key).Counters.Add(at, replica, clock, value)
+}
+
+func (b *buffer) mergeInto(key string, out *series) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out.Merge(b.items[key])
+}
+
+func (b *buffer) series(key string) *series {
+	if b.items[key] == nil {
+		b.items[key] = &series{}
+	}
+	return b.items[key]
+}

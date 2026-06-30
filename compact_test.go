@@ -61,11 +61,11 @@ func TestCompactErrors(t *testing.T) {
 	store := keyedMemStore{newMemStore()}
 	db, _ := New(store)
 	store.data["s:x"] = []byte{99}
-	db.compactAfter = 0
+	db.compactor.after = 0
 	if err := db.compact(ctx, "s:x"); err != nil {
 		t.Fatal(err)
 	}
-	db.compactAfter = time.Hour
+	db.compactor.after = time.Hour
 	if err := db.compact(ctx, "s:x"); err == nil {
 		t.Fatal("expected compact decode error")
 	}

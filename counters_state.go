@@ -9,14 +9,14 @@ type counterOp struct {
 	value   uint64
 }
 
-func (d *counterData) add(t, replica, clock, value uint64) {
+func (d *counterData) Add(t, replica, clock, value uint64) {
 	d.Time = append(d.Time, t)
 	d.Replica = append(d.Replica, replica)
 	d.Clock = append(d.Clock, clock)
 	d.Value = append(d.Value, value)
 }
 
-func (d *counterData) append(delta counterData) {
+func (d *counterData) Append(delta counterData) {
 	d.Time = append(d.Time, delta.Time...)
 	d.Replica = append(d.Replica, delta.Replica...)
 	d.Clock = append(d.Clock, delta.Clock...)
@@ -24,7 +24,7 @@ func (d *counterData) append(delta counterData) {
 	d.Buckets = append(d.Buckets, delta.Buckets...)
 }
 
-func (d *counterData) merge(delta counterData) {
+func (d *counterData) Merge(delta counterData) {
 	ops := make(map[uint64]map[counterOp]struct{}, len(d.Time)+len(delta.Time))
 	add := func(t, replica, clock, value uint64) {
 		if ops[t] == nil {
@@ -45,7 +45,7 @@ func (d *counterData) merge(delta counterData) {
 	d.Value = d.Value[:0]
 	for _, t := range times {
 		for op := range ops[t] {
-			d.add(t, op.replica, op.clock, op.value)
+			d.Add(t, op.replica, op.clock, op.value)
 		}
 	}
 	d.Buckets = mergeCounterBuckets(d.Buckets, delta.Buckets)
@@ -67,7 +67,7 @@ func mergeCounterBuckets(a, b []counterBucket) []counterBucket {
 	return out
 }
 
-func (d *counterData) compact(cutoff, span uint64) {
+func (d *counterData) Compact(cutoff, span uint64) {
 	buckets := make(map[uint64]uint64, len(d.Buckets))
 	for _, b := range d.Buckets {
 		buckets[b.Time] += b.Sum

@@ -87,6 +87,16 @@ func collect(t *testing.T, it iter.Seq2[time.Time, float64]) []float64 {
 	return out
 }
 
+func collectCall(t *testing.T, call func(func(time.Time, float64) bool)) []float64 {
+	t.Helper()
+	var out []float64
+	call(func(_ time.Time, value float64) bool {
+		out = append(out, value)
+		return true
+	})
+	return out
+}
+
 func TestStore(t *testing.T) {
 	Register("mem", func(*url.URL) (Store, error) {
 		return keyedMemStore{newMemStore()}, nil

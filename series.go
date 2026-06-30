@@ -4,7 +4,7 @@
 package trend
 
 import (
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -44,28 +44,28 @@ type counterBucket struct {
 	Sum  uint64
 }
 
-func (s *series) merge(delta *series) {
+func (s *series) Merge(delta *series) {
 	if delta == nil {
 		return
 	}
-	s.Samples.merge(delta.Samples)
-	s.Counters.merge(delta.Counters)
+	s.Samples.Merge(delta.Samples)
+	s.Counters.Merge(delta.Counters)
 }
 
-func (s *series) append(delta *series) {
+func (s *series) Append(delta *series) {
 	if delta == nil {
 		return
 	}
-	s.Samples.append(delta.Samples)
-	s.Counters.append(delta.Counters)
+	s.Samples.Append(delta.Samples)
+	s.Counters.Append(delta.Counters)
 }
 
-func (s *series) compact(cutoff time.Time, span time.Duration) {
+func (s *series) Compact(cutoff time.Time, span time.Duration) {
 	if span <= 0 {
 		return
 	}
-	s.Samples.compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
-	s.Counters.compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
+	s.Samples.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
+	s.Counters.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
 }
 
 func bucketOf(t, span uint64) uint64 {
@@ -80,6 +80,6 @@ func sortedTimes[V any](m map[uint64]V) []uint64 {
 	for t := range m {
 		times = append(times, t)
 	}
-	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+	slices.Sort(times)
 	return times
 }

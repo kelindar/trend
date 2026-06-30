@@ -5,14 +5,21 @@ package trend
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
 const leaseTTL = 30 * time.Second
 
+type compactor struct {
+	after  time.Duration
+	span   time.Duration
+	every  time.Duration
+	jitter time.Duration
+}
+
 func (db *DB) compact(ctx context.Context, key string) error {
-	if db.compactAfter <= 0 || db.compactSpan <= 0 {
+	if db.compactor.after <= 0 || db.compactor.span <= 0 {
 		return nil
 	}
 
@@ -24,14 +31,14 @@ func (db *DB) compact(ctx context.Context, key string) error {
 		defer func() { _ = release(ctx) }()
 	}
 
-	cutoff := time.Now().Add(-db.compactAfter)
+	cutoff := time.Now().Add(-db.compactor.after)
 	err := db.store.Update(ctx, key, func(old []byte) ([]byte, error) {
 		current, err := decode(old)
 		if err != nil {
 			return nil, err
 		}
-		current.compact(cutoff, db.compactSpan)
-		return current.marshal()
+		current.Compact(cutoff, db.compactor.span)
+		return current.Marshal()
 	})
 	if err == nil {
 		db.dropCache(key)
@@ -41,9 +48,9 @@ func (db *DB) compact(ctx context.Context, key string) error {
 
 func (db *DB) compactLoop(ctx context.Context) {
 	for {
-		wait := db.compactEvery
-		if db.compactJitter > 0 {
-			wait += time.Duration(rand.Int63n(int64(db.compactJitter)))
+		wait := db.compactor.every
+		if db.compactor.jitter > 0 {
+			wait += time.Duration(rand.Int64N(int64(db.compactor.jitter)))
 		}
 		timer := time.NewTimer(wait)
 		select {

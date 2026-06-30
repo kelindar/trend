@@ -2,4 +2,5 @@
 *.test
 *.exe
 *.gob
+*.cov
 bench.json
