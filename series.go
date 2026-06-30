@@ -60,6 +60,11 @@ func (s *series) Append(delta *series) {
 	s.Counters.Append(delta.Counters)
 }
 
+func (s *series) Reset() {
+	s.Samples.Reset()
+	s.Counters.Reset()
+}
+
 func (s *series) Compact(cutoff time.Time, span time.Duration) {
 	if span <= 0 {
 		return

@@ -11,6 +11,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type memStore struct {
@@ -101,22 +104,14 @@ func TestStore(t *testing.T) {
 	Register("mem", func(*url.URL) (Store, error) {
 		return keyedMemStore{newMemStore()}, nil
 	})
-	if _, err := Open("%zz"); err == nil {
-		t.Fatal("expected bad URI error")
-	}
-	if _, err := Open("missing://x"); err == nil {
-		t.Fatal("expected missing store error")
-	}
+	_, err := Open("%zz")
+	assert.Error(t, err)
+	_, err = Open("missing://x")
+	assert.Error(t, err)
 	db, err := Open("mem://x", WithReplica("r1"), WithCache(time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if db.replica != hashReplica("r1") {
-		t.Fatal("replica not set")
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, hashReplica("r1"), db.replica)
+	require.NoError(t, db.Close())
 }
 
 var errTest = errors.New("test")

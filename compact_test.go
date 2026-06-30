@@ -5,55 +5,37 @@ package trend
 
 import (
 	"context"
-	"errors"
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCompact(t *testing.T) {
 	ctx := context.Background()
 	store := keyedMemStore{newMemStore()}
 	db, err := New(store, WithCompaction(time.Hour, time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer db.Close()
 
 	old := time.Now().Add(-2 * time.Hour).Truncate(time.Minute)
-	if err := db.Samples("x").Set(ctx, old, 2); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Samples("x").Set(ctx, old.Add(time.Second), 4); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Counters("x").Add(ctx, old, 3); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Samples("x").Compact(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Counters("x").Compact(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := collect(t, must(db.Samples("x").Values(ctx, old, old.Add(time.Minute)))); !reflect.DeepEqual(got, []float64{3}) {
-		t.Fatalf("compacted samples: %v", got)
-	}
-	if got := collect(t, must(db.Counters("x").Values(ctx, old, old.Add(time.Minute)))); !reflect.DeepEqual(got, []float64{3}) {
-		t.Fatalf("compacted counters: %v", got)
-	}
+	require.NoError(t, db.Samples("x").Set(ctx, old, 2))
+	require.NoError(t, db.Samples("x").Set(ctx, old.Add(time.Second), 4))
+	require.NoError(t, db.Counters("x").Add(ctx, old, 3))
+	require.NoError(t, db.Samples("x").Compact(ctx))
+	require.NoError(t, db.Counters("x").Compact(ctx))
+	assert.Equal(t, []float64{3}, collect(t, must(db.Samples("x").Values(ctx, old, old.Add(time.Minute)))))
+	assert.Equal(t, []float64{3}, collect(t, must(db.Counters("x").Values(ctx, old, old.Add(time.Minute)))))
 }
 
 func TestLease(t *testing.T) {
 	db, _ := New(keyedMemStore{&memStore{data: make(map[string][]byte), leaseOK: false}})
-	if err := db.compact(context.Background(), "x"); err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, db.compact(context.Background(), "x"))
+
 	store := keyedMemStore{&memStore{data: make(map[string][]byte), leaseOK: true, leaseErr: errTest}}
 	db, _ = New(store)
-	if !errors.Is(db.compact(context.Background(), "x"), errTest) {
-		t.Fatal("expected lease error")
-	}
+	assert.ErrorIs(t, db.compact(context.Background(), "x"), errTest)
 }
 
 func TestCompactErrors(t *testing.T) {
@@ -62,11 +44,7 @@ func TestCompactErrors(t *testing.T) {
 	db, _ := New(store)
 	store.data["s:x"] = []byte{99}
 	db.compactor.after = 0
-	if err := db.compact(ctx, "s:x"); err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, db.compact(ctx, "s:x"))
 	db.compactor.after = time.Hour
-	if err := db.compact(ctx, "s:x"); err == nil {
-		t.Fatal("expected compact decode error")
-	}
+	assert.Error(t, db.compact(ctx, "s:x"))
 }

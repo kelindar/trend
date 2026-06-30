@@ -12,6 +12,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStore(t *testing.T) {
@@ -19,87 +21,57 @@ func TestStore(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
 	store := New(client, "p:")
-	if err := store.Update(ctx, "k", func(old []byte) ([]byte, error) {
-		if old != nil {
-			t.Fatal("expected empty old value")
-		}
+	require.NoError(t, store.Update(ctx, "k", func(old []byte) ([]byte, error) {
+		assert.Nil(t, old)
 		return []byte("v"), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := store.Load(ctx, "k"); err != nil || string(got) != "v" {
-		t.Fatalf("load: %q %v", got, err)
-	}
-	if err := store.Update(ctx, "k", func(old []byte) ([]byte, error) {
-		if string(old) != "v" {
-			t.Fatalf("old: %q", old)
-		}
+	}))
+	got, err := store.Load(ctx, "k")
+	require.NoError(t, err)
+	assert.Equal(t, "v", string(got))
+	require.NoError(t, store.Update(ctx, "k", func(old []byte) ([]byte, error) {
+		assert.Equal(t, "v", string(old))
 		return []byte("v2"), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Delete(ctx, "k"); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := store.Load(ctx, "k"); err != nil || got != nil {
-		t.Fatalf("missing: %q %v", got, err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.Close(); err != nil {
-		t.Fatal(err)
-	}
+	}))
+	assert.NoError(t, store.Delete(ctx, "k"))
+	got, err = store.Load(ctx, "k")
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	assert.NoError(t, store.Close())
+	assert.NoError(t, client.Close())
 }
 
 func TestLease(t *testing.T) {
 	ctx := context.Background()
 	server := miniredis.RunT(t)
 	opened, err := Open(&url.URL{Scheme: "redis", Host: server.Addr(), RawQuery: "prefix=p:"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	s := opened.(*store)
 	release, ok, err := s.Lease(ctx, "lock", time.Minute)
-	if err != nil || !ok {
-		t.Fatalf("lease: %v %v", ok, err)
-	}
-	if _, ok, err = s.Lease(ctx, "lock", time.Minute); err != nil || ok {
-		t.Fatalf("second lease: %v %v", ok, err)
-	}
-	if err := release(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, err = s.Lease(ctx, "lock", time.Minute); err != nil || !ok {
-		t.Fatalf("third lease: %v %v", ok, err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	assert.True(t, ok)
+	_, ok, err = s.Lease(ctx, "lock", time.Minute)
+	require.NoError(t, err)
+	assert.False(t, ok)
+	assert.NoError(t, release(ctx))
+	_, ok, err = s.Lease(ctx, "lock", time.Minute)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.NoError(t, s.Close())
 }
 
 func TestErrors(t *testing.T) {
-	if _, err := Open(&url.URL{Scheme: "http", Host: "localhost"}); err == nil {
-		t.Fatal("expected open error")
-	}
+	_, err := Open(&url.URL{Scheme: "http", Host: "localhost"})
+	assert.Error(t, err)
 
 	ctx := context.Background()
 	server := miniredis.RunT(t)
 	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
 	store := New(client, "")
 	errTest := errors.New("merge")
-	if err := store.Update(ctx, "x", func([]byte) ([]byte, error) { return nil, errTest }); !errors.Is(err, errTest) {
-		t.Fatal(err)
-	}
-	if err := client.LPush(ctx, "bad", "x").Err(); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Update(ctx, "bad", func([]byte) ([]byte, error) { return []byte("x"), nil }); err == nil {
-		t.Fatal("expected wrong type get error")
-	}
+	assert.ErrorIs(t, store.Update(ctx, "x", func([]byte) ([]byte, error) { return nil, errTest }), errTest)
+	require.NoError(t, client.LPush(ctx, "bad", "x").Err())
+	assert.Error(t, store.Update(ctx, "bad", func([]byte) ([]byte, error) { return []byte("x"), nil }))
 	server.Close()
-	if err := store.Update(ctx, "x", func([]byte) ([]byte, error) { return []byte("x"), nil }); err == nil {
-		t.Fatal("expected update get error")
-	}
+	assert.Error(t, store.Update(ctx, "x", func([]byte) ([]byte, error) { return []byte("x"), nil }))
 	_ = client.Close()
 }

@@ -5,9 +5,10 @@ package trend
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSamples(t *testing.T) {
@@ -15,35 +16,30 @@ func TestSamples(t *testing.T) {
 	s.Samples.Add(1, 1, 1, 1)
 	s.Samples.Add(2, 3, 2, 1)
 	s.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 4, Min: 4, Max: 4, First: 4, Last: 4}}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	got := collectCall(t, func(y func(time.Time, float64) bool) {
 		s.Samples.rangeValues(1, 10, 0, Sum, y)
-	}); len(got) != 3 {
-		t.Fatalf("zero sample span: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Len(t, got, 3)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		s.Samples.rangeValues(1, 10, 10, Max, y)
-	}); len(got) != 2 {
-		t.Fatalf("sample range: %v", got)
-	}
+	})
+	assert.Len(t, got, 2)
 
 	var raw series
 	raw.Samples.Add(1, 1, 1, 1)
 	raw.Samples.Add(61, 2, 2, 1)
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.Samples.rangeValues(2, 120, 60, Sum, y)
-	}); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("raw sample range: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Equal(t, []float64{2}, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.Samples.rangeValues(200, 300, 60, Sum, y)
-	}); len(got) != 0 {
-		t.Fatalf("empty raw sample range: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Empty(t, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.Samples.rangeValues(1, 120, 60, Sum, y)
-	}); len(got) != 2 {
-		t.Fatalf("raw sample buckets: %v", got)
-	}
+	})
+	assert.Len(t, got, 2)
 }
 
 func TestSampleIteratorsStop(t *testing.T) {
@@ -59,9 +55,7 @@ func TestSampleIteratorsStop(t *testing.T) {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("sample values stop: %d", calls)
-	}
+	assert.Equal(t, 1, calls)
 
 	raw := sampleData{
 		Time: []uint64{1, 61},
@@ -72,37 +66,29 @@ func TestSampleIteratorsStop(t *testing.T) {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("raw sample values stop: %d", calls)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	assert.Equal(t, 1, calls)
+	got := collectCall(t, func(y func(time.Time, float64) bool) {
 		buffered.values(2, 2, y)
-	}); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("sample values skip: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Equal(t, []float64{2}, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.values(61, 61, y)
-	}); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("raw sample values skip: %v", got)
-	}
+	})
+	assert.Equal(t, []float64{2}, got)
 
 	calls = 0
 	raw.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("raw sample range stop: %d", calls)
-	}
+	assert.Equal(t, 1, calls)
 
 	calls = 0
 	buffered.rangeValues(1, 2, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("sample range stop: %d", calls)
-	}
+	assert.Equal(t, 1, calls)
 	mixed := sampleData{
 		Time: []uint64{1, 2},
 		Data: []float64{1, 2},
@@ -111,30 +97,24 @@ func TestSampleIteratorsStop(t *testing.T) {
 			{Time: 2, Count: 1, Sum: 4},
 		},
 	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		mixed.rangeValues(2, 2, 60, Sum, y)
-	}); len(got) != 1 || got[0] != 6 {
-		t.Fatalf("sample range merge: %v", got)
-	}
+	})
+	assert.Equal(t, []float64{6}, got)
 }
 
 func TestSampleState(t *testing.T) {
-	if bucketOf(10, 0) != 10 {
-		t.Fatal("zero span bucket")
-	}
+	assert.Equal(t, uint64(10), bucketOf(10, 0))
 	var s series
 	s.Merge(nil)
 	s.Compact(time.Now(), 0)
 
 	a := combineSampleBucket(sampleBucket{}, sampleBucket{Count: 1, Sum: 1})
 	b := combineSampleBucket(a, sampleBucket{})
-	if a.Count != 1 || b.Count != 1 {
-		t.Fatal("empty bucket combine")
-	}
+	assert.Equal(t, uint64(1), a.Count)
+	assert.Equal(t, uint64(1), b.Count)
 	c := combineSampleBucket(sampleBucket{Count: 1, Sum: 1, Min: 1, Max: 1}, sampleBucket{Count: 1, Sum: 2, Min: 2, Max: 3})
-	if c.Max != 3 {
-		t.Fatal("max branch not merged")
-	}
+	assert.Equal(t, 3.0, c.Max)
 
 	var samples sampleData
 	samples.Compact(1, 1)
@@ -146,12 +126,10 @@ func TestSampleState(t *testing.T) {
 		Buckets: []sampleBucket{{Time: 0, Count: 1, Sum: 2, Min: 2, Max: 2, First: 2, Last: 2}},
 	}
 	samples.Compact(10, 10)
-	if len(samples.Time) != 1 || samples.Buckets[0].Min != 1 || samples.Buckets[0].Max != 7 {
-		t.Fatalf("sample compact: %+v", samples.Buckets)
-	}
-	if got := mergeSampleBuckets(nil, []sampleBucket{{Time: 1, Count: 1}}); len(got) != 1 {
-		t.Fatalf("sample bucket insert: %v", got)
-	}
+	assert.Len(t, samples.Time, 1)
+	assert.Equal(t, 1.0, samples.Buckets[0].Min)
+	assert.Equal(t, 7.0, samples.Buckets[0].Max)
+	assert.Len(t, mergeSampleBuckets(nil, []sampleBucket{{Time: 1, Count: 1}}), 1)
 }
 
 func TestSampleErrors(t *testing.T) {
@@ -159,7 +137,6 @@ func TestSampleErrors(t *testing.T) {
 	store.loadErr = errTest
 	db, _ := New(store)
 	now := time.Now()
-	if _, err := db.Samples("x").Range(context.Background(), now, now, time.Second, Sum); !errors.Is(err, errTest) {
-		t.Fatal("expected sample range error")
-	}
+	_, err := db.Samples("x").Range(context.Background(), now, now, time.Second, Sum)
+	assert.ErrorIs(t, err, errTest)
 }

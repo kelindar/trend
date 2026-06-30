@@ -24,6 +24,14 @@ func (d *sampleData) Append(delta sampleData) {
 	d.Buckets = append(d.Buckets, delta.Buckets...)
 }
 
+func (d *sampleData) Reset() {
+	d.Time = d.Time[:0]
+	d.Data = d.Data[:0]
+	d.Clock = d.Clock[:0]
+	d.Replica = d.Replica[:0]
+	d.Buckets = d.Buckets[:0]
+}
+
 func (d *sampleData) Merge(delta sampleData) {
 	points := make(map[uint64]samplePoint, len(d.Time)+len(delta.Time))
 	for i, t := range d.Time {

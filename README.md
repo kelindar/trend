@@ -8,23 +8,30 @@
 <a href="https://coveralls.io/github/kelindar/trend"><img src="https://coveralls.io/repos/github/kelindar/trend/badge.svg" alt="Coverage"></a>
 </p>
 
-# Trend
+## Trend: Small Time-Series Store for Go
 
-Trend is a small CRDT-backed time-series library for Go. It stores float samples and unsigned counters, keeps reads cheap with a cache, and keeps storage replaceable behind a tiny byte-store interface.
+Trend stores float64 samples and unsigned counters behind a small byte-store interface. It is meant for embedded or service-local time-series data where simple writes, mergeable state, iterator reads, and compact storage are enough.
 
-## Install
+It keeps recent raw points, can compact older points into buckets, and serializes state with a compact binary format compressed with S2.
 
-```sh
-go get github.com/kelindar/trend
-```
+- **Samples:** Last-write-wins float64 values.
+- **Counters:** Grow-only unsigned counter deltas.
+- **Reads:** `Values` and `Range` return Go iterators.
+- **Storage:** Pluggable stores registered by URI scheme.
 
-Pick a storage adapter by importing it for registration:
+**Use When**
 
-```go
-import _ "github.com/kelindar/trend/storage/buntdb"
-```
+- You need simple local time-series storage inside a Go service.
+- You want separate APIs for samples and counters.
+- You want compact serialized state without running a metrics database.
 
-## Example
+**Not For**
+
+- High-cardinality metrics ingestion at Prometheus/TSDB scale.
+- Distributed query engines, retention policies, or alerting.
+- Interoperable on-disk formats.
+
+## Quick Start
 
 ```go
 package main
@@ -40,6 +47,7 @@ import (
 
 func main() {
 	ctx := context.Background()
+
 	db, err := trend.Open("buntdb:///:memory:", trend.WithCache(time.Minute))
 	if err != nil {
 		panic(err)
@@ -57,19 +65,21 @@ func main() {
 }
 ```
 
-## Features
+## API Highlights
 
-- `trend.Samples` for float64 samples with last-write-wins merge semantics.
-- `trend.Counters` for unsigned grow-only counter deltas.
-- `Range` and `Values` APIs using Go iterators.
-- Optional buffered writes to reduce storage pressure.
-- Optional compaction for old windows.
-- BigCache read-through caching.
-- Storage adapters in separate modules, starting with BuntDB and Redis.
+- `Open(uri string, opts ...Option)`: Open a registered storage adapter.
+- `New(store Store, opts ...Option)`: Use an existing store implementation.
+- `Samples(key).Set(ctx, at, value)`: Store a float64 sample.
+- `Samples(key).Values(ctx, from, to)`: Iterate raw sample values.
+- `Samples(key).Range(ctx, from, to, span, agg)`: Iterate bucketed sample aggregates.
+- `Counters(key).Add(ctx, at, delta)`: Store an unsigned counter delta.
+- `Counters(key).Values(ctx, from, to)`: Iterate counter values.
+- `Counters(key).Range(ctx, from, to, span, agg)`: Iterate bucketed counter aggregates.
+- `Compact(ctx)`: Compact old points using the configured window.
 
 ## Storage
 
-Trend stores opaque bytes through this interface:
+Stores implement a byte-oriented update interface:
 
 ```go
 type Store interface {
@@ -80,8 +90,32 @@ type Store interface {
 }
 ```
 
-Adapters register themselves by scheme, so swapping storage is a URI and import change.
+Adapters register by URI scheme. Import the adapter package for registration:
 
-## License
+```go
+import (
+	_ "github.com/kelindar/trend/storage/buntdb"
+	_ "github.com/kelindar/trend/storage/redis"
+	_ "github.com/kelindar/trend/storage/sqlite"
+)
+```
 
-Trend is distributed under the MIT license. See [LICENSE](LICENSE).
+## Benchmarks
+
+```text
+name             time/op   ops/s    allocs/op
+samples/set      54.5 ns   18.3M    0
+samples/range    7.3 us    137.9K   6
+counters/add     41.2 ns   24.3M    0
+counters/range   5.6 us    177.1K   5
+codec/marshal_10k 325.1 us 3.1K     5
+codec/decode_10k 149.8 us  6.7K     7
+```
+
+Numbers are from local benchmarks on an Intel i7-13700K.
+
+## About
+
+Trend is MIT licensed and maintained by [@kelindar](https://github.com/kelindar).
+
+PRs and issues welcome.

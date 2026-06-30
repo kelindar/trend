@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/kelindar/bench"
@@ -88,18 +89,62 @@ func cases() []benchCase {
 				}
 			},
 		},
+		{
+			name: "codec/marshal_10k",
+			setup: func() func(int) {
+				store := newMemoryStore()
+				db := newMemoryDB(store, trend.WithReplica("codec-marshal"), trend.WithFlushEvery(time.Hour))
+				samples := db.Samples("codec")
+				return func(int) {
+					for i := range 10_000 {
+						must(samples.Set(ctx, time.Unix(int64(i), 0), float64(i)))
+					}
+					must(db.Flush(ctx))
+					must(store.Delete(ctx, "s:codec"))
+				}
+			},
+		},
+		{
+			name: "codec/decode_10k",
+			setup: func() func(int) {
+				store := newMemoryStore()
+				seedSamples(ctx, newMemoryDB(store, trend.WithReplica("codec-seed"), trend.WithFlushEvery(time.Hour)), "codec", 10_000)
+				db := newMemoryDB(store)
+				samples := db.Samples("codec")
+				from := time.Unix(0, 0)
+				to := time.Unix(10_000, 0)
+				return func(int) {
+					values, err := samples.Values(ctx, from, to)
+					must(err)
+					for range values {
+					}
+				}
+			},
+		},
 	}
 }
 
 func seededDB(name string, count int) *trend.DB {
 	ctx := context.Background()
 	db := newDB(name)
+	seedSamples(ctx, db, "cpu", count)
+	seedCounters(ctx, db, "requests", count)
+	return db
+}
+
+func seedSamples(ctx context.Context, db *trend.DB, key string, count int) {
 	for i := range count {
 		at := time.Unix(int64(i), 0)
-		must(db.Samples("cpu").Set(ctx, at, float64(i)))
-		must(db.Counters("requests").Add(ctx, at, uint64(i+1)))
+		must(db.Samples(key).Set(ctx, at, float64(i)))
 	}
-	return db
+	must(db.Flush(ctx))
+}
+
+func seedCounters(ctx context.Context, db *trend.DB, key string, count int) {
+	for i := range count {
+		must(db.Counters(key).Add(ctx, time.Unix(int64(i), 0), uint64(i+1)))
+	}
+	must(db.Flush(ctx))
 }
 
 func newDB(name string) *trend.DB {
@@ -116,6 +161,53 @@ func newBufferedDB(name string) *trend.DB {
 	out, err := trend.New(trendbuntdb.New(db, ""), trend.WithReplica(name), trend.WithFlushEvery(time.Hour))
 	must(err)
 	return out
+}
+
+func newMemoryDB(store *memoryStore, opts ...trend.Option) *trend.DB {
+	out, err := trend.New(store, opts...)
+	must(err)
+	return out
+}
+
+type memoryStore struct {
+	mu   sync.Mutex
+	data map[string][]byte
+}
+
+func newMemoryStore() *memoryStore {
+	return &memoryStore{data: make(map[string][]byte)}
+}
+
+func (s *memoryStore) Load(_ context.Context, key string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return clone(s.data[key]), nil
+}
+
+func (s *memoryStore) Update(_ context.Context, key string, fn func([]byte) ([]byte, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next, err := fn(clone(s.data[key]))
+	if err != nil {
+		return err
+	}
+	s.data[key] = clone(next)
+	return nil
+}
+
+func (s *memoryStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data, key)
+	return nil
+}
+
+func (s *memoryStore) Close() error {
+	return nil
+}
+
+func clone(v []byte) []byte {
+	return append([]byte(nil), v...)
 }
 
 func must(err error) {
