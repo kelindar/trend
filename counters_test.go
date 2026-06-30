@@ -14,26 +14,38 @@ func TestCounters(t *testing.T) {
 	var s series
 	s.Counters.Add(1, 1, 1, 2)
 	s.Counters.Buckets = []counterBucket{{Time: 10, Sum: 3}}
-	if got := collect(t, s.Counters.rangeValues(1, 10, 0, Sum)); len(got) != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		s.Counters.rangeValues(1, 10, 0, Sum, y)
+	}); len(got) != 2 {
 		t.Fatalf("zero counter span: %v", got)
 	}
-	if got := collect(t, s.Counters.rangeValues(1, 10, 10, Count)); len(got) != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		s.Counters.rangeValues(1, 10, 10, Count, y)
+	}); len(got) != 2 {
 		t.Fatalf("counter range: %v", got)
 	}
-	if got := collect(t, s.Counters.rangeValues(1, 10, 10, Sum)); len(got) != 2 || got[0] != 2 || got[1] != 3 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		s.Counters.rangeValues(1, 10, 10, Sum, y)
+	}); len(got) != 2 || got[0] != 2 || got[1] != 3 {
 		t.Fatalf("counter range sum: %v", got)
 	}
 
 	var raw series
 	raw.Counters.Add(1, 1, 1, 1)
 	raw.Counters.Add(61, 1, 2, 2)
-	if got := collect(t, raw.Counters.rangeValues(2, 120, 60, Sum)); len(got) != 1 || got[0] != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.Counters.rangeValues(2, 120, 60, Sum, y)
+	}); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("raw counter range: %v", got)
 	}
-	if got := collect(t, raw.Counters.rangeValues(200, 300, 60, Sum)); len(got) != 0 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.Counters.rangeValues(200, 300, 60, Sum, y)
+	}); len(got) != 0 {
 		t.Fatalf("empty raw counter range: %v", got)
 	}
-	if got := collect(t, raw.Counters.rangeValues(1, 120, 60, Sum)); len(got) != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.Counters.rangeValues(1, 120, 60, Sum, y)
+	}); len(got) != 2 {
 		t.Fatalf("raw counter buckets: %v", got)
 	}
 }
@@ -44,7 +56,7 @@ func TestCounterIteratorsStop(t *testing.T) {
 		Value: []uint64{1, 2},
 	}
 	calls := 0
-	counters.values(1, 61)(func(time.Time, float64) bool {
+	counters.values(1, 61, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -52,7 +64,7 @@ func TestCounterIteratorsStop(t *testing.T) {
 		t.Fatalf("counter values stop: %d", calls)
 	}
 	calls = 0
-	counterData{Time: []uint64{1}, Value: []uint64{1}}.values(1, 1)(func(time.Time, float64) bool {
+	counterData{Time: []uint64{1}, Value: []uint64{1}}.values(1, 1, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -67,18 +79,24 @@ func TestCounterIteratorsStop(t *testing.T) {
 			{Time: 2, Sum: 4},
 		},
 	}
-	if got := collect(t, mixed.values(2, 2)); len(got) != 1 || got[0] != 9 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		mixed.values(2, 2, y)
+	}); len(got) != 1 || got[0] != 9 {
 		t.Fatalf("counter values merge: %v", got)
 	}
-	if got := collect(t, counterData{Time: []uint64{2}, Value: []uint64{1}}.values(1, 1)); len(got) != 0 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		counterData{Time: []uint64{2}, Value: []uint64{1}}.values(1, 1, y)
+	}); len(got) != 0 {
 		t.Fatalf("counter values raw cutoff: %v", got)
 	}
-	if got := collect(t, counterData{Buckets: []counterBucket{{Time: 2, Sum: 1}}}.values(1, 1)); len(got) != 0 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		counterData{Buckets: []counterBucket{{Time: 2, Sum: 1}}}.values(1, 1, y)
+	}); len(got) != 0 {
 		t.Fatalf("counter values bucket cutoff: %v", got)
 	}
 
 	calls = 0
-	counters.rangeValues(1, 61, 60, Sum)(func(time.Time, float64) bool {
+	counters.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -88,14 +106,16 @@ func TestCounterIteratorsStop(t *testing.T) {
 
 	counters.Buckets = []counterBucket{{Time: 1, Sum: 1}}
 	calls = 0
-	counters.rangeValues(1, 61, 60, Sum)(func(time.Time, float64) bool {
+	counters.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
 	if calls != 1 {
 		t.Fatalf("bucket counter range stop: %d", calls)
 	}
-	if got := collect(t, mixed.rangeValues(2, 2, 60, Sum)); len(got) != 1 || got[0] != 9 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		mixed.rangeValues(2, 2, 60, Sum, y)
+	}); len(got) != 1 || got[0] != 9 {
 		t.Fatalf("counter range merge: %v", got)
 	}
 }

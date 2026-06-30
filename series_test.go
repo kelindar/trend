@@ -6,6 +6,7 @@ package trend
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestMerge(t *testing.T) {
@@ -27,7 +28,9 @@ func TestMerge(t *testing.T) {
 	a.Counters.Add(1, 1, 1, 2)
 	b.Counters.Add(1, 1, 1, 2)
 	a.Merge(&b)
-	values := collect(t, a.Counters.values(1, 1))
+	values := collectCall(t, func(y func(time.Time, float64) bool) {
+		a.Counters.values(1, 1, y)
+	})
 	if len(values) != 1 || !reflect.DeepEqual(values, []float64{2}) {
 		t.Fatalf("counter merge: %v", values)
 	}
@@ -79,11 +82,17 @@ func FuzzCounterMerge(f *testing.F) {
 		right.Merge(&b)
 		right.Merge(&c)
 		right.Merge(&a)
-		if len(collect(t, left.Counters.values(0, ^uint64(0)))) != len(collect(t, right.Counters.values(0, ^uint64(0)))) {
+		if len(collectCall(t, func(y func(time.Time, float64) bool) {
+			left.Counters.values(0, ^uint64(0), y)
+		})) != len(collectCall(t, func(y func(time.Time, float64) bool) {
+			right.Counters.values(0, ^uint64(0), y)
+		})) {
 			t.Fatalf("counter merge not associative/commutative")
 		}
 		left.Merge(&a)
-		if len(collect(t, left.Counters.values(ts, ts))) == 0 {
+		if len(collectCall(t, func(y func(time.Time, float64) bool) {
+			left.Counters.values(ts, ts, y)
+		})) == 0 {
 			t.Fatalf("counter merge lost value")
 		}
 	})

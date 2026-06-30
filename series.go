@@ -4,7 +4,7 @@
 package trend
 
 import (
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -80,6 +80,6 @@ func sortedTimes[V any](m map[uint64]V) []uint64 {
 	for t := range m {
 		times = append(times, t)
 	}
-	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+	slices.Sort(times)
 	return times
 }

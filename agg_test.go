@@ -4,6 +4,7 @@
 package trend
 
 import (
+	"iter"
 	"reflect"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ func TestAgg(t *testing.T) {
 var (
 	iterBenchCount int
 	iterBenchSum   float64
+	iterBenchSeq   iter.Seq2[time.Time, float64]
 )
 
 func iterBenchYield(_ time.Time, value float64) bool {
@@ -50,10 +52,10 @@ func iterBenchYield(_ time.Time, value float64) bool {
 
 func BenchmarkSampleIterators(b *testing.B) {
 	data := sampleData{}
-	for i := uint64(0); i < 1024; i++ {
+	for i := range uint64(1024) {
 		data.Add(i*10, float64(i), i, 1)
 	}
-	for i := uint64(0); i < 256; i++ {
+	for i := range uint64(256) {
 		data.Buckets = append(data.Buckets, sampleBucket{
 			Time:  i * 40,
 			Count: 4,
@@ -69,30 +71,54 @@ func BenchmarkSampleIterators(b *testing.B) {
 
 	b.Run("values", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			data.values(1000, 8000)(iterBenchYield)
+		for b.Loop() {
+			data.values(1000, 8000, iterBenchYield)
+		}
+	})
+	b.Run("values_escape", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			iterBenchSeq = func(yield func(time.Time, float64) bool) {
+				data.values(1000, 8000, yield)
+			}
 		}
 	})
 	b.Run("range_raw", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			raw.rangeValues(1000, 8000, 60, Sum)(iterBenchYield)
+		for b.Loop() {
+			raw.rangeValues(1000, 8000, 60, Sum, iterBenchYield)
+		}
+	})
+	b.Run("range_raw_escape", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			iterBenchSeq = func(yield func(time.Time, float64) bool) {
+				raw.rangeValues(1000, 8000, 60, Sum, yield)
+			}
 		}
 	})
 	b.Run("range_mixed", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			data.rangeValues(1000, 8000, 60, Sum)(iterBenchYield)
+		for b.Loop() {
+			data.rangeValues(1000, 8000, 60, Sum, iterBenchYield)
+		}
+	})
+	b.Run("range_mixed_escape", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			iterBenchSeq = func(yield func(time.Time, float64) bool) {
+				data.rangeValues(1000, 8000, 60, Sum, yield)
+			}
 		}
 	})
 }
 
 func BenchmarkCounterIterators(b *testing.B) {
 	data := counterData{}
-	for i := uint64(0); i < 1024; i++ {
+	for i := range uint64(1024) {
 		data.Add(i*10, 1, i, i)
 	}
-	for i := uint64(0); i < 256; i++ {
+	for i := range uint64(256) {
 		data.Buckets = append(data.Buckets, counterBucket{
 			Time: i * 40,
 			Sum:  i * 4,
@@ -103,20 +129,44 @@ func BenchmarkCounterIterators(b *testing.B) {
 
 	b.Run("values", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			data.values(1000, 8000)(iterBenchYield)
+		for b.Loop() {
+			data.values(1000, 8000, iterBenchYield)
+		}
+	})
+	b.Run("values_escape", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			iterBenchSeq = func(yield func(time.Time, float64) bool) {
+				data.values(1000, 8000, yield)
+			}
 		}
 	})
 	b.Run("range_raw", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			raw.rangeValues(1000, 8000, 60, Sum)(iterBenchYield)
+		for b.Loop() {
+			raw.rangeValues(1000, 8000, 60, Sum, iterBenchYield)
+		}
+	})
+	b.Run("range_raw_escape", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			iterBenchSeq = func(yield func(time.Time, float64) bool) {
+				raw.rangeValues(1000, 8000, 60, Sum, yield)
+			}
 		}
 	})
 	b.Run("range_mixed", func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			data.rangeValues(1000, 8000, 60, Sum)(iterBenchYield)
+		for b.Loop() {
+			data.rangeValues(1000, 8000, 60, Sum, iterBenchYield)
+		}
+	})
+	b.Run("range_mixed_escape", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			iterBenchSeq = func(yield func(time.Time, float64) bool) {
+				data.rangeValues(1000, 8000, 60, Sum, yield)
+			}
 		}
 	})
 }

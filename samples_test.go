@@ -15,23 +15,33 @@ func TestSamples(t *testing.T) {
 	s.Samples.Add(1, 1, 1, 1)
 	s.Samples.Add(2, 3, 2, 1)
 	s.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 4, Min: 4, Max: 4, First: 4, Last: 4}}
-	if got := collect(t, s.Samples.rangeValues(1, 10, 0, Sum)); len(got) != 3 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		s.Samples.rangeValues(1, 10, 0, Sum, y)
+	}); len(got) != 3 {
 		t.Fatalf("zero sample span: %v", got)
 	}
-	if got := collect(t, s.Samples.rangeValues(1, 10, 10, Max)); len(got) != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		s.Samples.rangeValues(1, 10, 10, Max, y)
+	}); len(got) != 2 {
 		t.Fatalf("sample range: %v", got)
 	}
 
 	var raw series
 	raw.Samples.Add(1, 1, 1, 1)
 	raw.Samples.Add(61, 2, 2, 1)
-	if got := collect(t, raw.Samples.rangeValues(2, 120, 60, Sum)); len(got) != 1 || got[0] != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.Samples.rangeValues(2, 120, 60, Sum, y)
+	}); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("raw sample range: %v", got)
 	}
-	if got := collect(t, raw.Samples.rangeValues(200, 300, 60, Sum)); len(got) != 0 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.Samples.rangeValues(200, 300, 60, Sum, y)
+	}); len(got) != 0 {
 		t.Fatalf("empty raw sample range: %v", got)
 	}
-	if got := collect(t, raw.Samples.rangeValues(1, 120, 60, Sum)); len(got) != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.Samples.rangeValues(1, 120, 60, Sum, y)
+	}); len(got) != 2 {
 		t.Fatalf("raw sample buckets: %v", got)
 	}
 }
@@ -45,7 +55,7 @@ func TestSampleIteratorsStop(t *testing.T) {
 		},
 	}
 	calls := 0
-	buffered.values(1, 2)(func(time.Time, float64) bool {
+	buffered.values(1, 2, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -58,22 +68,26 @@ func TestSampleIteratorsStop(t *testing.T) {
 		Data: []float64{1, 2},
 	}
 	calls = 0
-	raw.values(1, 61)(func(time.Time, float64) bool {
+	raw.values(1, 61, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
 	if calls != 1 {
 		t.Fatalf("raw sample values stop: %d", calls)
 	}
-	if got := collect(t, buffered.values(2, 2)); len(got) != 1 || got[0] != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		buffered.values(2, 2, y)
+	}); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("sample values skip: %v", got)
 	}
-	if got := collect(t, raw.values(61, 61)); len(got) != 1 || got[0] != 2 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		raw.values(61, 61, y)
+	}); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("raw sample values skip: %v", got)
 	}
 
 	calls = 0
-	raw.rangeValues(1, 61, 60, Sum)(func(time.Time, float64) bool {
+	raw.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -82,7 +96,7 @@ func TestSampleIteratorsStop(t *testing.T) {
 	}
 
 	calls = 0
-	buffered.rangeValues(1, 2, 60, Sum)(func(time.Time, float64) bool {
+	buffered.rangeValues(1, 2, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
@@ -97,7 +111,9 @@ func TestSampleIteratorsStop(t *testing.T) {
 			{Time: 2, Count: 1, Sum: 4},
 		},
 	}
-	if got := collect(t, mixed.rangeValues(2, 2, 60, Sum)); len(got) != 1 || got[0] != 6 {
+	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+		mixed.rangeValues(2, 2, 60, Sum, y)
+	}); len(got) != 1 || got[0] != 6 {
 		t.Fatalf("sample range merge: %v", got)
 	}
 }

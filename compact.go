@@ -5,7 +5,7 @@ package trend
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
@@ -50,7 +50,7 @@ func (db *DB) compactLoop(ctx context.Context) {
 	for {
 		wait := db.compactor.every
 		if db.compactor.jitter > 0 {
-			wait += time.Duration(rand.Int63n(int64(db.compactor.jitter)))
+			wait += time.Duration(rand.Int64N(int64(db.compactor.jitter)))
 		}
 		timer := time.NewTimer(wait)
 		select {
