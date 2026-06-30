@@ -93,7 +93,11 @@ type Store interface {
 Adapters register by URI scheme. Import the adapter package for registration:
 
 ```go
-import _ "github.com/kelindar/trend/storage/buntdb"
+import (
+	_ "github.com/kelindar/trend/storage/buntdb"
+	_ "github.com/kelindar/trend/storage/redis"
+	_ "github.com/kelindar/trend/storage/sqlite"
+)
 ```
 
 ## Benchmarks

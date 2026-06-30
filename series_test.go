@@ -4,9 +4,11 @@
 package trend
 
 import (
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMerge(t *testing.T) {
@@ -16,13 +18,9 @@ func TestMerge(t *testing.T) {
 	b.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 2, Min: 2, Max: 2, First: 2, Last: 2}}
 	a.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 4, Min: 4, Max: 4, First: 4, Last: 4}}
 	a.Merge(&b)
-	if a.Samples.Data[0] != 2 {
-		t.Fatal("newer sample did not win")
-	}
+	assert.Equal(t, 2.0, a.Samples.Data[0])
 	got := a.Samples.Buckets[0]
-	if got.Count != 2 || got.Sum != 6 || got.Min != 2 || got.Max != 4 || got.First != 4 || got.Last != 2 {
-		t.Fatalf("bucket merge: %+v", got)
-	}
+	assert.Equal(t, sampleBucket{Time: 10, Count: 2, Sum: 6, Min: 2, Max: 4, First: 4, Last: 2}, got)
 
 	a, b = series{}, series{}
 	a.Counters.Add(1, 1, 1, 2)
@@ -31,9 +29,7 @@ func TestMerge(t *testing.T) {
 	values := collectCall(t, func(y func(time.Time, float64) bool) {
 		a.Counters.values(1, 1, y)
 	})
-	if len(values) != 1 || !reflect.DeepEqual(values, []float64{2}) {
-		t.Fatalf("counter merge: %v", values)
-	}
+	assert.Equal(t, []float64{2}, values)
 }
 
 func TestSeriesAppend(t *testing.T) {
@@ -44,9 +40,10 @@ func TestSeriesAppend(t *testing.T) {
 	b.Counters.Buckets = []counterBucket{{Time: 1, Sum: 1}}
 	a.Append(nil)
 	a.Append(&b)
-	if len(a.Samples.Time) != 1 || len(a.Samples.Buckets) != 1 || len(a.Counters.Time) != 1 || len(a.Counters.Buckets) != 1 {
-		t.Fatalf("append: %+v", a)
-	}
+	assert.Len(t, a.Samples.Time, 1)
+	assert.Len(t, a.Samples.Buckets, 1)
+	assert.Len(t, a.Counters.Time, 1)
+	assert.Len(t, a.Counters.Buckets, 1)
 }
 
 func FuzzSampleMerge(f *testing.F) {
@@ -59,13 +56,11 @@ func FuzzSampleMerge(f *testing.F) {
 		ab.Merge(&b)
 		ba.Merge(&b)
 		ba.Merge(&a)
-		if len(ab.Samples.Data) != 1 || len(ba.Samples.Data) != 1 || ab.Samples.Data[0] != ba.Samples.Data[0] {
-			t.Fatalf("sample merge not commutative: %+v %+v", ab.Samples, ba.Samples)
-		}
+		require.Len(t, ab.Samples.Data, 1)
+		require.Len(t, ba.Samples.Data, 1)
+		assert.Equal(t, ab.Samples.Data[0], ba.Samples.Data[0])
 		ab.Merge(&a)
-		if len(ab.Samples.Data) != 1 {
-			t.Fatalf("sample merge not idempotent: %+v", ab.Samples)
-		}
+		require.Len(t, ab.Samples.Data, 1)
 	})
 }
 
@@ -82,18 +77,17 @@ func FuzzCounterMerge(f *testing.F) {
 		right.Merge(&b)
 		right.Merge(&c)
 		right.Merge(&a)
-		if len(collectCall(t, func(y func(time.Time, float64) bool) {
+		leftValues := collectCall(t, func(y func(time.Time, float64) bool) {
 			left.Counters.values(0, ^uint64(0), y)
-		})) != len(collectCall(t, func(y func(time.Time, float64) bool) {
+		})
+		rightValues := collectCall(t, func(y func(time.Time, float64) bool) {
 			right.Counters.values(0, ^uint64(0), y)
-		})) {
-			t.Fatalf("counter merge not associative/commutative")
-		}
+		})
+		assert.Len(t, leftValues, len(rightValues))
 		left.Merge(&a)
-		if len(collectCall(t, func(y func(time.Time, float64) bool) {
+		got := collectCall(t, func(y func(time.Time, float64) bool) {
 			left.Counters.values(ts, ts, y)
-		})) == 0 {
-			t.Fatalf("counter merge lost value")
-		}
+		})
+		require.NotEmpty(t, got)
 	})
 }

@@ -5,49 +5,44 @@ package trend
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCounters(t *testing.T) {
 	var s series
 	s.Counters.Add(1, 1, 1, 2)
 	s.Counters.Buckets = []counterBucket{{Time: 10, Sum: 3}}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	got := collectCall(t, func(y func(time.Time, float64) bool) {
 		s.Counters.rangeValues(1, 10, 0, Sum, y)
-	}); len(got) != 2 {
-		t.Fatalf("zero counter span: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Len(t, got, 2)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		s.Counters.rangeValues(1, 10, 10, Count, y)
-	}); len(got) != 2 {
-		t.Fatalf("counter range: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Len(t, got, 2)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		s.Counters.rangeValues(1, 10, 10, Sum, y)
-	}); len(got) != 2 || got[0] != 2 || got[1] != 3 {
-		t.Fatalf("counter range sum: %v", got)
-	}
+	})
+	assert.Equal(t, []float64{2, 3}, got)
 
 	var raw series
 	raw.Counters.Add(1, 1, 1, 1)
 	raw.Counters.Add(61, 1, 2, 2)
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.Counters.rangeValues(2, 120, 60, Sum, y)
-	}); len(got) != 1 || got[0] != 2 {
-		t.Fatalf("raw counter range: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Equal(t, []float64{2}, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.Counters.rangeValues(200, 300, 60, Sum, y)
-	}); len(got) != 0 {
-		t.Fatalf("empty raw counter range: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Empty(t, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		raw.Counters.rangeValues(1, 120, 60, Sum, y)
-	}); len(got) != 2 {
-		t.Fatalf("raw counter buckets: %v", got)
-	}
+	})
+	assert.Len(t, got, 2)
 }
 
 func TestCounterIteratorsStop(t *testing.T) {
@@ -60,17 +55,13 @@ func TestCounterIteratorsStop(t *testing.T) {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("counter values stop: %d", calls)
-	}
+	assert.Equal(t, 1, calls)
 	calls = 0
 	counterData{Time: []uint64{1}, Value: []uint64{1}}.values(1, 1, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("raw counter values stop: %d", calls)
-	}
+	assert.Equal(t, 1, calls)
 	mixed := counterData{
 		Time:  []uint64{1, 2, 2},
 		Value: []uint64{1, 2, 3},
@@ -79,30 +70,25 @@ func TestCounterIteratorsStop(t *testing.T) {
 			{Time: 2, Sum: 4},
 		},
 	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	got := collectCall(t, func(y func(time.Time, float64) bool) {
 		mixed.values(2, 2, y)
-	}); len(got) != 1 || got[0] != 9 {
-		t.Fatalf("counter values merge: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Equal(t, []float64{9}, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		counterData{Time: []uint64{2}, Value: []uint64{1}}.values(1, 1, y)
-	}); len(got) != 0 {
-		t.Fatalf("counter values raw cutoff: %v", got)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	})
+	assert.Empty(t, got)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		counterData{Buckets: []counterBucket{{Time: 2, Sum: 1}}}.values(1, 1, y)
-	}); len(got) != 0 {
-		t.Fatalf("counter values bucket cutoff: %v", got)
-	}
+	})
+	assert.Empty(t, got)
 
 	calls = 0
 	counters.rangeValues(1, 61, 60, Sum, func(time.Time, float64) bool {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("counter range stop: %d", calls)
-	}
+	assert.Equal(t, 1, calls)
 
 	counters.Buckets = []counterBucket{{Time: 1, Sum: 1}}
 	calls = 0
@@ -110,14 +96,11 @@ func TestCounterIteratorsStop(t *testing.T) {
 		calls++
 		return false
 	})
-	if calls != 1 {
-		t.Fatalf("bucket counter range stop: %d", calls)
-	}
-	if got := collectCall(t, func(y func(time.Time, float64) bool) {
+	assert.Equal(t, 1, calls)
+	got = collectCall(t, func(y func(time.Time, float64) bool) {
 		mixed.rangeValues(2, 2, 60, Sum, y)
-	}); len(got) != 1 || got[0] != 9 {
-		t.Fatalf("counter range merge: %v", got)
-	}
+	})
+	assert.Equal(t, []float64{9}, got)
 }
 
 func TestCounterState(t *testing.T) {
@@ -129,12 +112,9 @@ func TestCounterState(t *testing.T) {
 		Buckets: []counterBucket{{Time: 1, Sum: 1}},
 	}
 	counters.Compact(15, 10)
-	if len(counters.Time) != 1 || len(counters.Buckets) != 2 {
-		t.Fatalf("counter compact: %+v", counters)
-	}
-	if got := mergeCounterBuckets([]counterBucket{{Time: 1, Sum: 1}}, []counterBucket{{Time: 2, Sum: 2}}); len(got) != 2 {
-		t.Fatalf("counter bucket merge: %v", got)
-	}
+	assert.Len(t, counters.Time, 1)
+	assert.Len(t, counters.Buckets, 2)
+	assert.Len(t, mergeCounterBuckets([]counterBucket{{Time: 1, Sum: 1}}, []counterBucket{{Time: 2, Sum: 2}}), 2)
 }
 
 func TestCounterErrors(t *testing.T) {
@@ -142,10 +122,8 @@ func TestCounterErrors(t *testing.T) {
 	store.loadErr = errTest
 	db, _ := New(store)
 	now := time.Now()
-	if _, err := db.Counters("x").Values(context.Background(), now, now); !errors.Is(err, errTest) {
-		t.Fatal("expected counter values error")
-	}
-	if _, err := db.Counters("x").Range(context.Background(), now, now, time.Second, Sum); !errors.Is(err, errTest) {
-		t.Fatal("expected counter range error")
-	}
+	_, err := db.Counters("x").Values(context.Background(), now, now)
+	assert.ErrorIs(t, err, errTest)
+	_, err = db.Counters("x").Range(context.Background(), now, now, time.Second, Sum)
+	assert.ErrorIs(t, err, errTest)
 }

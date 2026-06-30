@@ -10,19 +10,17 @@ import (
 	"time"
 
 	"github.com/kelindar/bench"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCases(t *testing.T) {
 	cases := cases()
-	if len(cases) != 6 {
-		t.Fatalf("cases: %d", len(cases))
-	}
+	assert.Len(t, cases, 6)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.setup()(1)
-			if tc.String() != tc.name {
-				t.Fatalf("string: %q", tc.String())
-			}
+			assert.Equal(t, tc.name, tc.String())
 		})
 	}
 }
@@ -41,35 +39,21 @@ func TestMain(t *testing.T) {
 func TestMemoryStore(t *testing.T) {
 	ctx := context.Background()
 	store := newMemoryStore()
-	if err := store.Update(ctx, "x", func([]byte) ([]byte, error) {
+	require.NoError(t, store.Update(ctx, "x", func([]byte) ([]byte, error) {
 		return []byte("ok"), nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}))
 	got, err := store.Load(ctx, "x")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "ok" {
-		t.Fatalf("load: %q", got)
-	}
-	if err := store.Delete(ctx, "x"); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "ok", string(got))
+	require.NoError(t, store.Delete(ctx, "x"))
 	got, err = store.Load(ctx, "x")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != nil {
-		t.Fatalf("delete: %q", got)
-	}
+	require.NoError(t, err)
+	assert.Nil(t, got)
 }
 
 func TestMustPanics(t *testing.T) {
 	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic")
-		}
+		assert.NotNil(t, recover())
 	}()
 	must(errors.New("boom"))
 }

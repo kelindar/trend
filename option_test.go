@@ -4,14 +4,14 @@
 package trend
 
 import (
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestOption(t *testing.T) {
 	store := newMemStore()
 	_, err := New(store, func(*DB) error { return errTest })
-	if !errors.Is(err, errTest) || !store.closed {
-		t.Fatal("expected option error and close")
-	}
+	assert.ErrorIs(t, err, errTest)
+	assert.True(t, store.closed)
 }

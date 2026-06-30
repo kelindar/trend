@@ -5,9 +5,10 @@ package trend
 
 import (
 	"iter"
-	"reflect"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestAgg(t *testing.T) {
@@ -15,7 +16,7 @@ func TestAgg(t *testing.T) {
 	f.Add(3)
 	f.Add(1)
 	f.Add(5)
-	if got := []float64{
+	got := []float64{
 		f.Value(Sum),
 		f.Value(Count),
 		f.Value(Min),
@@ -23,19 +24,18 @@ func TestAgg(t *testing.T) {
 		f.Value(Mean),
 		f.Value(First),
 		f.Value(Last),
-	}; !reflect.DeepEqual(got, []float64{9, 3, 1, 5, 3, 3, 5}) {
-		t.Fatalf("agg values: %v", got)
 	}
-	if (fold{}).Value(Mean) != 0 {
-		t.Fatal("empty mean should be zero")
-	}
+	assert.Equal(t, []float64{9, 3, 1, 5, 3, 3, 5}, got)
+	assert.Zero(t, (fold{}).Value(Mean))
+
 	var merged fold
 	merged.Merge(sampleBucket{})
 	merged.Merge(sampleBucket{Count: 1, Sum: 10, Min: 10, Max: 10, First: 10, Last: 10})
 	merged.Merge(sampleBucket{Count: 1, Sum: 1, Min: 1, Max: 11, First: 1, Last: 1})
-	if merged.min != 1 || merged.max != 11 || merged.first != 10 || merged.last != 1 {
-		t.Fatalf("merge: %+v", merged)
-	}
+	assert.Equal(t, 1.0, merged.min)
+	assert.Equal(t, 11.0, merged.max)
+	assert.Equal(t, 10.0, merged.first)
+	assert.Equal(t, 1.0, merged.last)
 }
 
 var (
