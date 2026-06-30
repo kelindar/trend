@@ -9,14 +9,14 @@ type samplePoint struct {
 	replica uint64
 }
 
-func (d *sampleData) add(t uint64, value float64, clock, replica uint64) {
+func (d *sampleData) Add(t uint64, value float64, clock, replica uint64) {
 	d.Time = append(d.Time, t)
 	d.Data = append(d.Data, value)
 	d.Clock = append(d.Clock, clock)
 	d.Replica = append(d.Replica, replica)
 }
 
-func (d *sampleData) append(delta sampleData) {
+func (d *sampleData) Append(delta sampleData) {
 	d.Time = append(d.Time, delta.Time...)
 	d.Data = append(d.Data, delta.Data...)
 	d.Clock = append(d.Clock, delta.Clock...)
@@ -24,7 +24,7 @@ func (d *sampleData) append(delta sampleData) {
 	d.Buckets = append(d.Buckets, delta.Buckets...)
 }
 
-func (d *sampleData) merge(delta sampleData) {
+func (d *sampleData) Merge(delta sampleData) {
 	points := make(map[uint64]samplePoint, len(d.Time)+len(delta.Time))
 	for i, t := range d.Time {
 		points[t] = samplePoint{value: d.Data[i], clock: d.Clock[i], replica: d.Replica[i]}
@@ -42,7 +42,7 @@ func (d *sampleData) merge(delta sampleData) {
 	d.Replica = d.Replica[:0]
 	for _, t := range times {
 		p := points[t]
-		d.add(t, p.value, p.clock, p.replica)
+		d.Add(t, p.value, p.clock, p.replica)
 	}
 	d.Buckets = mergeSampleBuckets(d.Buckets, delta.Buckets)
 }
@@ -90,7 +90,7 @@ func combineSampleBucket(a, b sampleBucket) sampleBucket {
 	return a
 }
 
-func (d *sampleData) compact(cutoff, span uint64) {
+func (d *sampleData) Compact(cutoff, span uint64) {
 	if len(d.Time) == 0 {
 		return
 	}

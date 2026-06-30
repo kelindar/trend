@@ -37,8 +37,8 @@ func (db *DB) compact(ctx context.Context, key string) error {
 		if err != nil {
 			return nil, err
 		}
-		current.compact(cutoff, db.compactor.span)
-		return current.marshal()
+		current.Compact(cutoff, db.compactor.span)
+		return current.Marshal()
 	})
 	if err == nil {
 		db.dropCache(key)

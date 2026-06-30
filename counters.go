@@ -83,7 +83,7 @@ func (d counterData) rangeValues(from, to, span uint64, agg Agg) []point {
 			}
 			out = append(out, point{
 				at:    time.Unix(int64(current), 0),
-				value: f.value(agg),
+				value: f.Value(agg),
 			})
 		}
 		for i, t := range d.Time {
@@ -96,7 +96,7 @@ func (d counterData) rangeValues(from, to, span uint64, agg Agg) []point {
 				f = fold{}
 			}
 			current = k
-			f.add(float64(d.Value[i]))
+			f.Add(float64(d.Value[i]))
 		}
 		flush()
 		return out
@@ -107,7 +107,7 @@ func (d counterData) rangeValues(from, to, span uint64, agg Agg) []point {
 		if folds[k] == nil {
 			folds[k] = &fold{}
 		}
-		folds[k].add(v)
+		folds[k].Add(v)
 	}
 	for _, b := range d.Buckets {
 		if inWindow(b.Time, from, to) {
@@ -123,7 +123,7 @@ func (d counterData) rangeValues(from, to, span uint64, agg Agg) []point {
 	for _, t := range times {
 		out = append(out, point{
 			at:    time.Unix(int64(t), 0),
-			value: folds[t].value(agg),
+			value: folds[t].Value(agg),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].at.Before(out[j].at) })

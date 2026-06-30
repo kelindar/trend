@@ -121,8 +121,8 @@ func (db *DB) merge(ctx context.Context, key string, delta *series) error {
 		if err != nil {
 			return nil, err
 		}
-		current.merge(delta)
-		return current.marshal()
+		current.Merge(delta)
+		return current.Marshal()
 	})
 }
 
@@ -149,7 +149,7 @@ func (db *DB) writeSample(ctx context.Context, key string, at uint64, value floa
 		return nil
 	}
 	var delta series
-	delta.Samples.add(at, value, clock, db.replica)
+	delta.Samples.Add(at, value, clock, db.replica)
 	return db.write(ctx, key, &delta)
 }
 
@@ -162,7 +162,7 @@ func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) er
 		return nil
 	}
 	var delta series
-	delta.Counters.add(at, db.replica, clock, value)
+	delta.Counters.Add(at, db.replica, clock, value)
 	return db.write(ctx, key, &delta)
 }
 
@@ -219,25 +219,25 @@ func (b *buffer) flush() map[string]*series {
 func (b *buffer) append(key string, delta *series) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.series(key).append(delta)
+	b.series(key).Append(delta)
 }
 
 func (b *buffer) addSample(key string, at uint64, value float64, clock, replica uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.series(key).Samples.add(at, value, clock, replica)
+	b.series(key).Samples.Add(at, value, clock, replica)
 }
 
 func (b *buffer) addCounter(key string, at, replica, clock, value uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.series(key).Counters.add(at, replica, clock, value)
+	b.series(key).Counters.Add(at, replica, clock, value)
 }
 
 func (b *buffer) mergeInto(key string, out *series) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out.merge(b.items[key])
+	out.Merge(b.items[key])
 }
 
 func (b *buffer) series(key string) *series {

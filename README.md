@@ -51,10 +51,9 @@ func main() {
 	_ = db.Counters("requests").Add(ctx, now, 1)
 
 	values, _ := db.Samples("cpu").Values(ctx, now.Add(-time.Minute), now)
-	values(func(at time.Time, value float64) bool {
+	for at, value := range values {
 		fmt.Println(at, value)
-		return true
-	})
+	}
 }
 ```
 

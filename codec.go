@@ -29,7 +29,7 @@ func decode(b []byte) (*series, error) {
 	return &s, nil
 }
 
-func (s *series) marshal() ([]byte, error) {
+func (s *series) Marshal() ([]byte, error) {
 	encoded, _ := binary.Marshal(s)
 	dst := make([]byte, s2.MaxEncodedLen(len(encoded))+1)
 	dst[0] = version

@@ -86,7 +86,7 @@ func (d sampleData) rangeValues(from, to, span uint64, agg Agg) []point {
 			}
 			out = append(out, point{
 				at:    time.Unix(int64(current), 0),
-				value: f.value(agg),
+				value: f.Value(agg),
 			})
 		}
 		for i, t := range raw.Time {
@@ -99,7 +99,7 @@ func (d sampleData) rangeValues(from, to, span uint64, agg Agg) []point {
 				f = fold{}
 			}
 			current = k
-			f.add(raw.Data[i])
+			f.Add(raw.Data[i])
 		}
 		flush()
 		return out
@@ -111,7 +111,7 @@ func (d sampleData) rangeValues(from, to, span uint64, agg Agg) []point {
 			if folds[k] == nil {
 				folds[k] = &fold{}
 			}
-			folds[k].merge(b)
+			folds[k].Merge(b)
 		}
 	}
 	raw := sorted.TimeSeries{Time: d.Time, Data: d.Data}
@@ -121,7 +121,7 @@ func (d sampleData) rangeValues(from, to, span uint64, agg Agg) []point {
 			if folds[k] == nil {
 				folds[k] = &fold{}
 			}
-			folds[k].add(raw.Data[i])
+			folds[k].Add(raw.Data[i])
 		}
 	}
 	times := sortedTimes(folds)
@@ -129,7 +129,7 @@ func (d sampleData) rangeValues(from, to, span uint64, agg Agg) []point {
 	for _, t := range times {
 		out = append(out, point{
 			at:    time.Unix(int64(t), 0),
-			value: folds[t].value(agg),
+			value: folds[t].Value(agg),
 		})
 	}
 	return out

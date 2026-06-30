@@ -12,8 +12,8 @@ import (
 
 func TestSamples(t *testing.T) {
 	var s series
-	s.Samples.add(1, 1, 1, 1)
-	s.Samples.add(2, 3, 2, 1)
+	s.Samples.Add(1, 1, 1, 1)
+	s.Samples.Add(2, 3, 2, 1)
 	s.Samples.Buckets = []sampleBucket{{Time: 10, Count: 1, Sum: 4, Min: 4, Max: 4, First: 4, Last: 4}}
 	if got := s.Samples.rangeValues(1, 10, 0, Sum); len(got) != 3 {
 		t.Fatalf("zero sample span: %v", got)
@@ -23,8 +23,8 @@ func TestSamples(t *testing.T) {
 	}
 
 	var raw series
-	raw.Samples.add(1, 1, 1, 1)
-	raw.Samples.add(61, 2, 2, 1)
+	raw.Samples.Add(1, 1, 1, 1)
+	raw.Samples.Add(61, 2, 2, 1)
 	if got := raw.Samples.rangeValues(2, 120, 60, Sum); len(got) != 1 || got[0].value != 2 {
 		t.Fatalf("raw sample range: %v", got)
 	}
@@ -41,8 +41,8 @@ func TestSampleState(t *testing.T) {
 		t.Fatal("zero span bucket")
 	}
 	var s series
-	s.merge(nil)
-	s.compact(time.Now(), 0)
+	s.Merge(nil)
+	s.Compact(time.Now(), 0)
 
 	a := combineSampleBucket(sampleBucket{}, sampleBucket{Count: 1, Sum: 1})
 	b := combineSampleBucket(a, sampleBucket{})
@@ -55,7 +55,7 @@ func TestSampleState(t *testing.T) {
 	}
 
 	var samples sampleData
-	samples.compact(1, 1)
+	samples.Compact(1, 1)
 	samples = sampleData{
 		Time:    []uint64{1, 2, 3, 20},
 		Data:    []float64{5, 1, 7, 9},
@@ -63,7 +63,7 @@ func TestSampleState(t *testing.T) {
 		Replica: []uint64{1, 1, 1, 1},
 		Buckets: []sampleBucket{{Time: 0, Count: 1, Sum: 2, Min: 2, Max: 2, First: 2, Last: 2}},
 	}
-	samples.compact(10, 10)
+	samples.Compact(10, 10)
 	if len(samples.Time) != 1 || samples.Buckets[0].Min != 1 || samples.Buckets[0].Max != 7 {
 		t.Fatalf("sample compact: %+v", samples.Buckets)
 	}

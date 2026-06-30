@@ -12,7 +12,7 @@ import (
 
 func TestCounters(t *testing.T) {
 	var s series
-	s.Counters.add(1, 1, 1, 2)
+	s.Counters.Add(1, 1, 1, 2)
 	s.Counters.Buckets = []counterBucket{{Time: 10, Sum: 3}}
 	if got := s.Counters.rangeValues(1, 10, 0, Sum); len(got) != 2 {
 		t.Fatalf("zero counter span: %v", got)
@@ -22,8 +22,8 @@ func TestCounters(t *testing.T) {
 	}
 
 	var raw series
-	raw.Counters.add(1, 1, 1, 1)
-	raw.Counters.add(61, 1, 2, 2)
+	raw.Counters.Add(1, 1, 1, 1)
+	raw.Counters.Add(61, 1, 2, 2)
 	if got := raw.Counters.rangeValues(2, 120, 60, Sum); len(got) != 1 || got[0].value != 2 {
 		t.Fatalf("raw counter range: %v", got)
 	}
@@ -43,7 +43,7 @@ func TestCounterState(t *testing.T) {
 		Value:   []uint64{1, 2},
 		Buckets: []counterBucket{{Time: 1, Sum: 1}},
 	}
-	counters.compact(15, 10)
+	counters.Compact(15, 10)
 	if len(counters.Time) != 1 || len(counters.Buckets) != 2 {
 		t.Fatalf("counter compact: %+v", counters)
 	}

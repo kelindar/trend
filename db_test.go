@@ -79,7 +79,7 @@ func TestBuffer(t *testing.T) {
 	}
 
 	var delta series
-	delta.Samples.add(1, 1, 1, 1)
+	delta.Samples.Add(1, 1, 1, 1)
 	if err := db.write(ctx, "s:y", &delta); err != nil {
 		t.Fatal(err)
 	}
