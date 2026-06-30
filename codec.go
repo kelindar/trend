@@ -135,14 +135,13 @@ func decodeSeries(data []byte) (*series, error) {
 	sampleBuckets := r.count()
 	counters := r.count()
 	counterBuckets := r.count()
-	if r.err != nil {
-		return nil, r.err
-	}
 	fields, ok := minFields(samples, sampleBuckets, counters, counterBuckets)
-	if !ok {
+	switch {
+	case r.err != nil:
+		return nil, r.err
+	case !ok:
 		return nil, errLargeCodec
-	}
-	if !r.hasFields(fields) {
+	case !r.hasFields(fields):
 		return nil, r.err
 	}
 
@@ -158,10 +157,10 @@ func decodeSeries(data []byte) (*series, error) {
 	r.delta(out.Counters.Clock)
 	r.delta(out.Counters.Value)
 	r.counterBuckets(out.Counters.Buckets)
-	if r.err != nil {
+	switch {
+	case r.err != nil:
 		return nil, r.err
-	}
-	if len(r.data) != 0 {
+	case len(r.data) != 0:
 		return nil, errLongCodec
 	}
 	return out, nil

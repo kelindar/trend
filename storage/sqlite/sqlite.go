@@ -102,10 +102,10 @@ func (s *store) Lease(ctx context.Context, key string, ttl time.Duration) (func(
 	now := time.Now().UnixNano()
 	var until int64
 	err = tx.QueryRowContext(ctx, `SELECT until FROM trend_lease WHERE key = ?`, key).Scan(&until)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	switch {
+	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return nil, false, err
-	}
-	if until > now {
+	case until > now:
 		return func(context.Context) error { return nil }, false, tx.Commit()
 	}
 	if _, err = tx.ExecContext(ctx, `
