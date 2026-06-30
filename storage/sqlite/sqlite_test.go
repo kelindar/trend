@@ -47,7 +47,10 @@ func TestLease(t *testing.T) {
 	ctx := context.Background()
 	opened, err := Open(&url.URL{Path: ":memory:", RawQuery: "prefix=p:"})
 	require.NoError(t, err)
-	s := opened.(*store)
+	s := opened.(interface {
+		Lease(context.Context, string, time.Duration) (func(context.Context) error, bool, error)
+		Close() error
+	})
 	release, ok, err := s.Lease(ctx, "lock", time.Minute)
 	require.NoError(t, err)
 	assert.True(t, ok)

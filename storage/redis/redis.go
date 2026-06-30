@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/kelindar/trend"
+	"github.com/kelindar/trend/storage/cached"
+	"github.com/kelindar/trend/storage/memory"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,11 +37,17 @@ func Open(u *url.URL) (trend.Store, error) {
 		return nil, err
 	}
 	db := redis.NewClient(opt)
-	return &store{db: db, prefix: prefix, own: true}, nil
+	cacheStore, err := memory.New(time.Hour)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return cached.New(&store{db: db, prefix: prefix, own: true}, cacheStore), nil
 }
 
 func New(db redis.UniversalClient, prefix string) trend.Store {
-	return &store{db: db, prefix: prefix}
+	cacheStore, _ := memory.New(time.Hour)
+	return cached.New(&store{db: db, prefix: prefix}, cacheStore)
 }
 
 func (s *store) Load(ctx context.Context, key string) ([]byte, error) {

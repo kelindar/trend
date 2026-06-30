@@ -15,7 +15,7 @@ import (
 func TestDB(t *testing.T) {
 	ctx := context.Background()
 	store := keyedMemStore{newMemStore()}
-	db, err := New(store, WithReplica("a"), WithCache(time.Second))
+	db, err := New(store, WithReplica("a"))
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -54,32 +54,6 @@ func TestBuffer(t *testing.T) {
 	require.NoError(t, db.writeCounter(ctx, "c:z", 1, 1))
 	require.NoError(t, db.writeCounter(ctx, "c:z", 2, 2))
 
-	t.Run("cache hit", func(t *testing.T) {
-		store := keyedMemStore{newMemStore()}
-		db, err := New(store, WithCache(time.Second), WithFlushEvery(time.Hour))
-		require.NoError(t, err)
-		defer db.Close()
-
-		at := time.Unix(5, 0)
-		require.NoError(t, db.Counters("c").Add(ctx, at, 2))
-		require.NoError(t, db.Samples("s").Set(ctx, at, 1.5))
-
-		got := collect(t, must(db.Counters("c").Values(ctx, at, at)))
-		assert.Equal(t, []float64{2}, got)
-		got = collect(t, must(db.Samples("s").Values(ctx, at, at)))
-		assert.Equal(t, []float64{1.5}, got)
-
-		require.NoError(t, db.Samples("s").Set(ctx, at.Add(time.Second), 2.5))
-		got = collect(t, must(db.Samples("s").Values(ctx, at, at.Add(time.Second))))
-		assert.Equal(t, []float64{1.5, 2.5}, got)
-
-		require.NoError(t, db.Samples("s").Set(ctx, at.Add(2*time.Second), 3.5))
-		got = collect(t, must(db.Samples("s").Values(ctx, at, at.Add(2*time.Second))))
-		assert.Equal(t, []float64{1.5, 2.5, 3.5}, got)
-
-		_, err = db.load(ctx, "s")
-		require.NoError(t, err)
-	})
 }
 
 func TestLoops(t *testing.T) {

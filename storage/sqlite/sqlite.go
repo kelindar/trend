@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kelindar/trend"
+	"github.com/kelindar/trend/storage/cached"
+	"github.com/kelindar/trend/storage/memory"
 	_ "github.com/ncruces/go-sqlite3/driver" // cgo-free, uses wazero
 )
 
@@ -40,7 +42,12 @@ func Open(u *url.URL) (trend.Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &store{db: db, prefix: u.Query().Get("prefix"), own: true}, nil
+	cacheStore, err := memory.New(time.Hour)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return cached.New(&store{db: db, prefix: u.Query().Get("prefix"), own: true}, cacheStore), nil
 }
 
 func New(db *sql.DB, prefix string) (trend.Store, error) {
@@ -48,7 +55,11 @@ func New(db *sql.DB, prefix string) (trend.Store, error) {
 	if err := migrate(db); err != nil {
 		return nil, err
 	}
-	return &store{db: db, prefix: prefix}, nil
+	cacheStore, err := memory.New(time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	return cached.New(&store{db: db, prefix: prefix}, cacheStore), nil
 }
 
 func (s *store) Load(ctx context.Context, key string) ([]byte, error) {
@@ -83,7 +94,10 @@ func (s *store) Update(ctx context.Context, key string, merge func([]byte) ([]by
 	`, key, next); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *store) Delete(ctx context.Context, key string) error {

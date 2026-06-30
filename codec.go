@@ -103,6 +103,16 @@ func (s series) valid() error {
 	return s.scan(func(segment) bool { return true })
 }
 
+func (s series) versionOK() error {
+	if len(s) == 0 {
+		return nil
+	}
+	if s[0] != version {
+		return fmt.Errorf("trend: unsupported version %d", s[0])
+	}
+	return nil
+}
+
 func (s series) maxTime() (uint64, bool) {
 	var out uint64
 	var ok bool

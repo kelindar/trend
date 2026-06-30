@@ -45,7 +45,10 @@ func TestLease(t *testing.T) {
 	server := miniredis.RunT(t)
 	opened, err := Open(&url.URL{Scheme: "redis", Host: server.Addr(), RawQuery: "prefix=p:"})
 	require.NoError(t, err)
-	s := opened.(*store)
+	s := opened.(interface {
+		Lease(context.Context, string, time.Duration) (func(context.Context) error, bool, error)
+		Close() error
+	})
 	release, ok, err := s.Lease(ctx, "lock", time.Minute)
 	require.NoError(t, err)
 	assert.True(t, ok)

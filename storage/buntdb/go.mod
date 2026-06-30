@@ -9,11 +9,9 @@ require (
 )
 
 require (
-	github.com/allegro/bigcache/v3 v3.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/rs/xid v1.5.0 // indirect
 	github.com/tidwall/btree v1.4.2 // indirect
 	github.com/tidwall/gjson v1.14.3 // indirect
 	github.com/tidwall/grect v0.1.4 // indirect

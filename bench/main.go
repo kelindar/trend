@@ -5,11 +5,18 @@ package main
 
 import (
 	"context"
+	"net/url"
 	"sync"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/kelindar/bench"
 	"github.com/kelindar/trend"
+	"github.com/kelindar/trend/storage/buntdb"
+	"github.com/kelindar/trend/storage/memory"
+	trendredis "github.com/kelindar/trend/storage/redis"
+	"github.com/kelindar/trend/storage/sqlite"
+	goredis "github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -125,7 +132,57 @@ func cases() []benchCase {
 				}
 			},
 		},
+		loadCase(ctx, "load/memory", openMemoryStore),
+		loadCase(ctx, "load/buntdb", openBuntDBStore),
+		loadCase(ctx, "load/sqlite", openSQLiteStore),
+		loadCase(ctx, "load/redis", openRedisStore),
 	}
+}
+
+func loadCase(ctx context.Context, name string, open func() trend.Store) benchCase {
+	const key = "s:samples"
+	_, raw := seedSampleStore(ctx, "samples")
+	return benchCase{
+		name: name,
+		setup: func() func(int) {
+			store := open()
+			must(store.Update(ctx, key, func([]byte) ([]byte, error) {
+				return raw, nil
+			}))
+			return func(int) {
+				got, err := store.Load(ctx, key)
+				must(err)
+				if len(got) != len(raw) {
+					panic("short load")
+				}
+			}
+		},
+	}
+}
+
+func openMemoryStore() trend.Store {
+	store, err := memory.New(time.Hour)
+	must(err)
+	return store
+}
+
+func openBuntDBStore() trend.Store {
+	store, err := buntdb.Open(&url.URL{Path: ":memory:"})
+	must(err)
+	return store
+}
+
+func openSQLiteStore() trend.Store {
+	store, err := sqlite.Open(&url.URL{Path: ":memory:"})
+	must(err)
+	return store
+}
+
+func openRedisStore() trend.Store {
+	server, err := miniredis.Run()
+	must(err)
+	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
+	return trendredis.New(client, "")
 }
 
 func seedSampleStore(ctx context.Context, key string) (*memoryStore, []byte) {
