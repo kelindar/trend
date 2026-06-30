@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,6 +93,34 @@ func TestErrors(t *testing.T) {
 	assert.ErrorIs(t, store.Update(ctx, "k", func([]byte) ([]byte, error) {
 		return nil, errTest
 	}), errTest)
+}
+
+func TestLease(t *testing.T) {
+	ctx := context.Background()
+	wrapped := New(newMemStore(), newMemStore())
+	s, ok := wrapped.(*store)
+	require.True(t, ok)
+	release, locked, err := s.Lease(ctx, "k", 0)
+	require.NoError(t, err)
+	assert.False(t, locked)
+	require.NoError(t, release(ctx))
+
+	primary := &leaseStore{memStore: *newMemStore()}
+	wrapped = New(primary, newMemStore())
+	s, ok = wrapped.(*store)
+	require.True(t, ok)
+	release, locked, err = s.Lease(ctx, "k", time.Second)
+	require.NoError(t, err)
+	assert.True(t, locked)
+	require.NoError(t, release(ctx))
+}
+
+type leaseStore struct {
+	memStore
+}
+
+func (m *leaseStore) Lease(context.Context, string, time.Duration) (func(context.Context) error, bool, error) {
+	return func(context.Context) error { return nil }, true, nil
 }
 
 func clone(v []byte) []byte {
