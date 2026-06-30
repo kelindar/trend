@@ -4,6 +4,7 @@
 package trend
 
 import (
+	"context"
 	"hash/fnv"
 	"time"
 
@@ -25,7 +26,7 @@ func WithReplica(id string) Option {
 // WithCache enables a local read-through cache.
 func WithCache(ttl time.Duration) Option {
 	return func(db *DB) error {
-		cache, err := bigcache.NewBigCache(bigcache.DefaultConfig(ttl))
+		cache, err := bigcache.New(context.Background(), bigcache.DefaultConfig(ttl))
 		db.cache = cache
 		return err
 	}
@@ -42,8 +43,8 @@ func WithFlushEvery(every time.Duration) Option {
 // WithCompaction enables lossy compaction of raw values older than after.
 func WithCompaction(after, span time.Duration) Option {
 	return func(db *DB) error {
-		db.compactAfter = after
-		db.compactSpan = span
+		db.compactor.after = after
+		db.compactor.span = span
 		return nil
 	}
 }
@@ -51,8 +52,8 @@ func WithCompaction(after, span time.Duration) Option {
 // WithCompactor starts a jittered background compactor for keys seen locally.
 func WithCompactor(every, jitter time.Duration) Option {
 	return func(db *DB) error {
-		db.compactEvery = every
-		db.compactJitter = jitter
+		db.compactor.every = every
+		db.compactor.jitter = jitter
 		return nil
 	}
 }
