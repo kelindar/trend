@@ -104,8 +104,11 @@ func (db *DB) Flush(ctx context.Context) error {
 	}
 
 	db.pendingMu.Lock()
-	pending := db.pending
-	db.pending = make(map[string]*series)
+	pending := make(map[string]*series, len(db.pending))
+	for key, delta := range db.pending {
+		pending[key] = delta
+		delete(db.pending, key)
+	}
 	db.pendingMu.Unlock()
 
 	for key, delta := range pending {
