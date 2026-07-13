@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// DB stores time-series samples and counters.
+// DB stores time-series samples, counters, and sketches.
 type DB struct {
 	store      Store
 	replica    uint64
@@ -68,6 +68,12 @@ func (db *DB) Samples(key string) Samples {
 func (db *DB) Counters(key string) Counters {
 	db.seen.Store(counterKey(key), struct{}{})
 	return Counters{db: db, key: counterKey(key)}
+}
+
+// Sketches returns a sketch series handle.
+func (db *DB) Sketches(key string) Sketches {
+	db.seen.Store(sketchKey(key), struct{}{})
+	return Sketches{db: db, key: sketchKey(key)}
 }
 
 // Close flushes pending writes and closes resources.
@@ -143,6 +149,17 @@ func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) er
 	return nil
 }
 
+func (db *DB) writeSketch(ctx context.Context, key string, at uint64, value float64) error {
+	clock := db.clock.Add(1)
+	if db.buffer != nil {
+		db.buffer.addSketch(key, at, value, clock, db.replica)
+		return nil
+	}
+	var delta pending
+	delta.Sketches.Add(at, value, clock, db.replica)
+	return db.merge(ctx, key, &delta)
+}
+
 func (db *DB) loadRaw(ctx context.Context, key string) (series, error) {
 	raw, err := db.store.Load(ctx, key)
 	if err != nil {
@@ -178,6 +195,7 @@ func (db *DB) load(ctx context.Context, key string) (series, error) {
 
 func sampleKey(key string) string  { return "s:" + key }
 func counterKey(key string) string { return "c:" + key }
+func sketchKey(key string) string  { return "h:" + key }
 
 var loadMarshal = func(p *pending) ([]byte, error) {
 	return p.marshal()
@@ -209,6 +227,12 @@ func (b *buffer) addCounter(key string, at, replica, clock, value uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.series(key).Counters.Add(at, replica, clock, value)
+}
+
+func (b *buffer) addSketch(key string, at uint64, value float64, clock, replica uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.series(key).Sketches.Add(at, value, clock, replica)
 }
 
 func (b *buffer) clone(key string) *pending {
@@ -256,5 +280,18 @@ func clonePending(p *pending) *pending {
 	out.Counters.Clock = append(out.Counters.Clock, p.Counters.Clock...)
 	out.Counters.Value = append(out.Counters.Value, p.Counters.Value...)
 	out.Counters.Buckets = append(out.Counters.Buckets, p.Counters.Buckets...)
+	out.Sketches.Time = append(out.Sketches.Time, p.Sketches.Time...)
+	out.Sketches.Data = append(out.Sketches.Data, p.Sketches.Data...)
+	out.Sketches.Clock = append(out.Sketches.Clock, p.Sketches.Clock...)
+	out.Sketches.Replica = append(out.Sketches.Replica, p.Sketches.Replica...)
+	out.Sketches.Buckets = cloneSketchBuckets(p.Sketches.Buckets)
+	return out
+}
+
+func cloneSketchBuckets(buckets []sketchBucket) []sketchBucket {
+	out := make([]sketchBucket, len(buckets))
+	for i, b := range buckets {
+		out[i] = sketchBucket{Time: b.Time, Data: append([]byte(nil), b.Data...)}
+	}
 	return out
 }

@@ -120,10 +120,10 @@ func (s series) counterValues(from, to uint64, yield func(time.Time, float64) bo
 		}
 		return true
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
-	}
-	if decodeErr != nil {
+	case decodeErr != nil:
 		return decodeErr
 	}
 	flush()
@@ -203,10 +203,10 @@ func (s series) counterRange(from, to, span uint64, agg Agg, yield func(time.Tim
 		}
 		return true
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
-	}
-	if decodeErr != nil {
+	case decodeErr != nil:
 		return decodeErr
 	}
 	if f.count > 0 {

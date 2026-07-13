@@ -132,6 +132,50 @@ func cases() []benchCase {
 				}
 			},
 		},
+		{
+			name: "sketches/append",
+			setup: func() func(int) {
+				store, seed := seedSketchStore(ctx, "sketches")
+				db := newMemoryDB(store, trend.WithReplica("sketches-append"), trend.WithFlushEvery(time.Hour))
+				sketches := db.Sketches("sketches")
+				return func(int) {
+					store.Set("h:sketches", seed)
+					for i := range benchCount {
+						at := time.Unix(int64(benchCount+i), 0)
+						must(sketches.Add(ctx, at, float64(i)))
+					}
+					must(db.Flush(ctx))
+				}
+			},
+		},
+		{
+			name: "sketches/range",
+			setup: func() func(int) {
+				store, _ := seedSketchStore(ctx, "sketches")
+				sketches := newMemoryDB(store).Sketches("sketches")
+				return func(int) {
+					values, err := sketches.Range(ctx, from, to, time.Minute)
+					must(err)
+					for _, value := range values {
+						_ = value.Quantile(0.99)
+					}
+				}
+			},
+		},
+		{
+			name: "sketches/values",
+			setup: func() func(int) {
+				store, _ := seedSketchStore(ctx, "sketches")
+				sketches := newMemoryDB(store).Sketches("sketches")
+				return func(int) {
+					values, err := sketches.Values(ctx, from, to)
+					must(err)
+					for _, value := range values {
+						_ = value.Count()
+					}
+				}
+			},
+		},
 		loadCase(ctx, "load/memory", openMemoryStore),
 		loadCase(ctx, "load/buntdb", openBuntDBStore),
 		loadCase(ctx, "load/sqlite", openSQLiteStore),
@@ -205,6 +249,16 @@ func seedCounterStore(ctx context.Context, key string) (*memoryStore, []byte) {
 	return store, raw
 }
 
+func seedSketchStore(ctx context.Context, key string) (*memoryStore, []byte) {
+	store := newMemoryStore()
+	db := newMemoryDB(store, trend.WithReplica(key+"-seed"), trend.WithFlushEvery(time.Hour))
+	seedSketches(ctx, db, key, benchCount)
+	must(db.Close())
+	raw, err := store.Load(ctx, "h:"+key)
+	must(err)
+	return store, raw
+}
+
 func seedSamples(ctx context.Context, db *trend.DB, key string, count int) {
 	for i := range count {
 		at := time.Unix(int64(i), 0)
@@ -216,6 +270,13 @@ func seedSamples(ctx context.Context, db *trend.DB, key string, count int) {
 func seedCounters(ctx context.Context, db *trend.DB, key string, count int) {
 	for i := range count {
 		must(db.Counters(key).Add(ctx, time.Unix(int64(i), 0), uint64(i+1)))
+	}
+	must(db.Flush(ctx))
+}
+
+func seedSketches(ctx context.Context, db *trend.DB, key string, count int) {
+	for i := range count {
+		must(db.Sketches(key).Add(ctx, time.Unix(int64(i), 0), float64(i)))
 	}
 	must(db.Flush(ctx))
 }

@@ -23,6 +23,8 @@ const (
 	segmentCounters
 	segmentSampleBuckets
 	segmentCounterBuckets
+	segmentSketches
+	segmentSketchBuckets
 )
 
 var (
@@ -104,10 +106,10 @@ func (s series) valid() error {
 }
 
 func (s series) versionOK() error {
-	if len(s) == 0 {
+	switch {
+	case len(s) == 0:
 		return nil
-	}
-	if s[0] != version {
+	case s[0] != version:
 		return fmt.Errorf("trend: unsupported version %d", s[0])
 	}
 	return nil
@@ -164,7 +166,9 @@ func (p *pending) appendTo(dst []byte) ([]byte, error) {
 	dst = appendSampleBucketSegments(dst, p.Samples.Buckets, buf)
 	dst = appendSampleSegments(dst, p.Samples, buf)
 	dst = appendCounterBucketSegments(dst, p.Counters.Buckets, buf)
-	return appendCounterSegments(dst, p.Counters, buf), nil
+	dst = appendCounterSegments(dst, p.Counters, buf)
+	dst = appendSketchBucketSegments(dst, p.Sketches.Buckets, buf)
+	return appendSketchSegments(dst, p.Sketches, buf), nil
 }
 
 func (p *pending) valid() error {
@@ -176,17 +180,20 @@ func (p *pending) valid() error {
 		len(p.Samples.Time) != len(p.Samples.Replica) ||
 		len(p.Counters.Time) != len(p.Counters.Replica) ||
 		len(p.Counters.Time) != len(p.Counters.Clock) ||
-		len(p.Counters.Time) != len(p.Counters.Value) {
+		len(p.Counters.Time) != len(p.Counters.Value) ||
+		len(p.Sketches.Time) != len(p.Sketches.Data) ||
+		len(p.Sketches.Time) != len(p.Sketches.Clock) ||
+		len(p.Sketches.Time) != len(p.Sketches.Replica) {
 		return errShapeCodec
 	}
 	return nil
 }
 
 func (s series) scan(yield func(segment) bool) error {
-	if len(s) == 0 {
+	switch {
+	case len(s) == 0:
 		return nil
-	}
-	if s[0] != version {
+	case s[0] != version:
 		return fmt.Errorf("trend: unsupported version %d", s[0])
 	}
 	r := codecReader{data: s[1:]}
@@ -207,7 +214,8 @@ func (s series) scan(yield func(segment) bool) error {
 			return errLargeCodec
 		}
 		switch seg.kind {
-		case segmentSamples, segmentCounters, segmentSampleBuckets, segmentCounterBuckets:
+		case segmentSamples, segmentCounters, segmentSampleBuckets, segmentCounterBuckets,
+			segmentSketches, segmentSketchBuckets:
 		default:
 			return errVarintCodec
 		}
@@ -228,6 +236,10 @@ func (seg segment) applyRaw(out *pending, raw []byte) error {
 		return decodeSampleBuckets(raw, seg.count, &out.Samples)
 	case segmentCounterBuckets:
 		return decodeCounterBuckets(raw, seg.count, &out.Counters)
+	case segmentSketches:
+		return decodeSketches(raw, seg.count, &out.Sketches)
+	case segmentSketchBuckets:
+		return decodeSketchBuckets(raw, seg.count, &out.Sketches)
 	default:
 		return errVarintCodec
 	}

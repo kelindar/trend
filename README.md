@@ -10,19 +10,20 @@
 
 ## Trend: Small Time-Series Store for Go
 
-Trend stores float64 samples and unsigned counters behind a small byte-store interface. It is meant for embedded or service-local time-series data where simple writes, mergeable state, iterator reads, and compact storage are enough.
+Trend stores float64 samples, unsigned counters, and sketches behind a small byte-store interface. It is meant for embedded or service-local time-series data where simple writes, mergeable state, iterator reads, and compact storage are enough.
 
 It keeps recent raw points, can compact older points into buckets, and serializes state with a compact binary format compressed with S2.
 
 - **Samples:** Last-write-wins float64 values.
 - **Counters:** Grow-only unsigned counter deltas.
+- **Sketches:** Exact recent observations with compact approximate quantiles.
 - **Reads:** `Values` and `Range` return Go iterators.
 - **Storage:** Pluggable stores registered by URI scheme.
 
 **Use When**
 
 - You need simple local time-series storage inside a Go service.
-- You want separate APIs for samples and counters.
+- You want separate APIs for samples, counters, and sketches.
 - You want compact serialized state without running a metrics database.
 
 **Not For**
@@ -57,6 +58,7 @@ func main() {
 	now := time.Now()
 	_ = db.Samples("cpu").Set(ctx, now, 0.42)
 	_ = db.Counters("requests").Add(ctx, now, 1)
+	_ = db.Sketches("latency").Add(ctx, now, 12.5)
 
 	values, _ := db.Samples("cpu").Values(ctx, now.Add(-time.Minute), now)
 	for at, value := range values {
@@ -75,6 +77,9 @@ func main() {
 - `Counters(key).Add(ctx, at, delta)`: Store an unsigned counter delta.
 - `Counters(key).Values(ctx, from, to)`: Iterate counter values.
 - `Counters(key).Range(ctx, from, to, span, agg)`: Iterate bucketed counter aggregates.
+- `Sketches(key).Add(ctx, at, value)`: Store one finite float64 observation.
+- `Sketches(key).Values(ctx, from, to)`: Iterate sketches at retained resolution.
+- `Sketches(key).Range(ctx, from, to, span)`: Iterate merged sketch buckets.
 - `Compact(ctx)`: Compact old points using the configured window.
 
 ## Storage
