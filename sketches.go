@@ -13,53 +13,53 @@ import (
 	"time"
 )
 
-var errInvalidHistogramValue = errors.New("trend: histogram value must be finite")
+var errInvalidSketchValue = errors.New("trend: sketch value must be finite")
 
-// Histograms writes and reads distributions of float64 observations.
-type Histograms struct {
+// Sketches writes and reads distributions of float64 observations.
+type Sketches struct {
 	db  *DB
 	key string
 }
 
 // Add stores one observation.
-func (h Histograms) Add(ctx context.Context, at time.Time, value float64) error {
+func (h Sketches) Add(ctx context.Context, at time.Time, value float64) error {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return errInvalidHistogramValue
+		return errInvalidSketchValue
 	}
-	return h.db.writeHistogram(ctx, h.key, uint64(at.Unix()), value)
+	return h.db.writeSketch(ctx, h.key, uint64(at.Unix()), value)
 }
 
-// Values returns histograms at the finest retained resolution.
-func (h Histograms) Values(ctx context.Context, from, to time.Time) (iter.Seq2[time.Time, Histogram], error) {
+// Values returns sketches at the finest retained resolution.
+func (h Sketches) Values(ctx context.Context, from, to time.Time) (iter.Seq2[time.Time, Sketch], error) {
 	data, err := h.db.load(ctx, h.key)
 	if err != nil {
 		return nil, err
 	}
 	fromUnix, toUnix := uint64(from.Unix()), uint64(to.Unix())
-	return func(yield func(time.Time, Histogram) bool) {
-		_ = data.histogramRange(fromUnix, toUnix, 0, yield)
+	return func(yield func(time.Time, Sketch) bool) {
+		_ = data.sketchRange(fromUnix, toUnix, 0, yield)
 	}, nil
 }
 
-// Range returns histograms merged into time buckets.
-func (h Histograms) Range(ctx context.Context, from, to time.Time, span time.Duration) (iter.Seq2[time.Time, Histogram], error) {
+// Range returns sketches merged into time buckets.
+func (h Sketches) Range(ctx context.Context, from, to time.Time, span time.Duration) (iter.Seq2[time.Time, Sketch], error) {
 	data, err := h.db.load(ctx, h.key)
 	if err != nil {
 		return nil, err
 	}
 	fromUnix, toUnix := uint64(from.Unix()), uint64(to.Unix())
-	return func(yield func(time.Time, Histogram) bool) {
-		_ = data.histogramRange(fromUnix, toUnix, uint64(span.Seconds()), yield)
+	return func(yield func(time.Time, Sketch) bool) {
+		_ = data.sketchRange(fromUnix, toUnix, uint64(span.Seconds()), yield)
 	}, nil
 }
 
 // Compact compacts this series.
-func (h Histograms) Compact(ctx context.Context) error {
+func (h Sketches) Compact(ctx context.Context) error {
 	return h.db.compact(ctx, h.key)
 }
 
-// Histogram is an immutable encoded distribution.
-type Histogram struct {
+// Sketch is an immutable encoded distribution.
+type Sketch struct {
 	data  []byte
 	count uint64
 	sum   float64
@@ -69,17 +69,17 @@ type Histogram struct {
 }
 
 // Count returns the number of observations.
-func (h Histogram) Count() uint64 {
+func (h Sketch) Count() uint64 {
 	return h.count
 }
 
 // Sum returns the sum of observations.
-func (h Histogram) Sum() float64 {
+func (h Sketch) Sum() float64 {
 	return h.sum
 }
 
 // Min returns the smallest observation, or NaN when empty.
-func (h Histogram) Min() float64 {
+func (h Sketch) Min() float64 {
 	if h.count == 0 {
 		return math.NaN()
 	}
@@ -87,7 +87,7 @@ func (h Histogram) Min() float64 {
 }
 
 // Max returns the largest observation, or NaN when empty.
-func (h Histogram) Max() float64 {
+func (h Sketch) Max() float64 {
 	if h.count == 0 {
 		return math.NaN()
 	}
@@ -95,7 +95,7 @@ func (h Histogram) Max() float64 {
 }
 
 // Mean returns the arithmetic mean, or NaN when empty.
-func (h Histogram) Mean() float64 {
+func (h Sketch) Mean() float64 {
 	if h.count == 0 {
 		return math.NaN()
 	}
@@ -103,7 +103,7 @@ func (h Histogram) Mean() float64 {
 }
 
 // Quantile returns the nearest-rank quantile, or NaN for an invalid quantile.
-func (h Histogram) Quantile(q float64) float64 {
+func (h Sketch) Quantile(q float64) float64 {
 	switch {
 	case h.count == 0 || math.IsNaN(q) || q < 0 || q > 1:
 		return math.NaN()
@@ -116,11 +116,11 @@ func (h Histogram) Quantile(q float64) float64 {
 	rank := uint64(math.Ceil(q * float64(h.count)))
 	var value float64
 	switch h.kind {
-	case histogramExact:
+	case sketchExact:
 		value = exactQuantile(h.data, rank)
-	case histogramExactXOR:
+	case sketchExactXOR:
 		value = exactXORQuantile(&r, h.count, rank)
-	case histogramApprox:
+	case sketchApprox:
 		value = approximateQuantile(&r, rank)
 	default:
 		return math.NaN()
@@ -165,7 +165,7 @@ func approximateQuantile(r *codecReader, rank uint64) float64 {
 	zero := r.uvarint()
 	negative := *r
 	var negativeTotal uint64
-	r.histogramBinsEach(func(_ int, count uint64) bool {
+	r.sketchBinsEach(func(_ int, count uint64) bool {
 		negativeTotal += count
 		return true
 	})
@@ -173,9 +173,9 @@ func approximateQuantile(r *codecReader, rank uint64) float64 {
 		target := negativeTotal - rank + 1
 		var cumulative uint64
 		var value float64
-		negative.histogramBinsEach(func(key int, count uint64) bool {
+		negative.sketchBinsEach(func(key int, count uint64) bool {
 			cumulative += count
-			value = -histogramBinValue(key)
+			value = -sketchBinValue(key)
 			return cumulative < target
 		})
 		r.err = negative.err
@@ -187,8 +187,8 @@ func approximateQuantile(r *codecReader, rank uint64) float64 {
 	}
 	rank -= zero
 	var value float64
-	r.histogramBinsEach(func(key int, count uint64) bool {
-		value = histogramBinValue(key)
+	r.sketchBinsEach(func(key int, count uint64) bool {
+		value = sketchBinValue(key)
 		if rank <= count {
 			return false
 		}
@@ -198,7 +198,7 @@ func approximateQuantile(r *codecReader, rank uint64) float64 {
 	return value
 }
 
-func (s series) histogramRange(from, to, span uint64, yield func(time.Time, Histogram) bool) error {
+func (s series) sketchRange(from, to, span uint64, yield func(time.Time, Sketch) bool) error {
 	var rawCount, bucketBytes int
 	var hasRaw, hasBuckets bool
 	err := s.scan(func(seg segment) bool {
@@ -206,10 +206,10 @@ func (s series) histogramRange(from, to, span uint64, yield func(time.Time, Hist
 			return true
 		}
 		switch seg.kind {
-		case segmentHistograms:
+		case segmentSketches:
 			hasRaw = true
 			rawCount += seg.count
-		case segmentHistogramBuckets:
+		case segmentSketchBuckets:
 			hasBuckets = true
 			bucketBytes += seg.rawLen
 		}
@@ -219,18 +219,18 @@ func (s series) histogramRange(from, to, span uint64, yield func(time.Time, Hist
 	case err != nil || !hasRaw && !hasBuckets:
 		return err
 	case !hasBuckets:
-		return s.histogramRawRange(from, to, span, rawCount, yield)
+		return s.sketchRawRange(from, to, span, rawCount, yield)
 	case !hasRaw && span == 0:
-		return s.histogramBucketValues(from, to, bucketBytes, yield)
+		return s.sketchBucketValues(from, to, bucketBytes, yield)
 	default:
-		return s.histogramMixedRange(from, to, span, yield)
+		return s.sketchMixedRange(from, to, span, yield)
 	}
 }
 
-func (s series) histogramRawRange(
+func (s series) sketchRawRange(
 	from, to, span uint64,
 	count int,
-	yield func(time.Time, Histogram) bool,
+	yield func(time.Time, Sketch) bool,
 ) error {
 	arena := make([]byte, 0, count*8)
 	var exactScratch [segmentSize]float64
@@ -247,13 +247,13 @@ func (s series) histogramRawRange(
 		slices.Sort(exact)
 		arena = appendExactValues(arena, exact)
 		data := arena[start:len(arena):len(arena)]
-		result := Histogram{
+		result := Sketch{
 			data:  data,
 			count: countValue,
 			sum:   sum,
 			min:   minValue,
 			max:   maxValue,
-			kind:  histogramExact,
+			kind:  sketchExact,
 		}
 		if !yield(blockTime(currentTime), result) {
 			stopped = true
@@ -271,7 +271,7 @@ func (s series) histogramRawRange(
 	buf := encodeBuffers.Get().(*codecBuffer)
 	defer putEncodeBuffer(buf)
 	err := s.scan(func(seg segment) bool {
-		if seg.kind != segmentHistograms || seg.to < from || seg.from > to {
+		if seg.kind != segmentSketches || seg.to < from || seg.from > to {
 			return true
 		}
 		raw, err := seg.decodeInto(buf.raw)
@@ -325,17 +325,17 @@ func (s series) histogramRawRange(
 	return nil
 }
 
-func (s series) histogramBucketValues(
+func (s series) sketchBucketValues(
 	from, to uint64,
 	capacity int,
-	yield func(time.Time, Histogram) bool,
+	yield func(time.Time, Sketch) bool,
 ) error {
 	arena := make([]byte, 0, capacity)
 	var decodeErr error
 	buf := encodeBuffers.Get().(*codecBuffer)
 	defer putEncodeBuffer(buf)
 	err := s.scan(func(seg segment) bool {
-		if seg.kind != segmentHistogramBuckets || seg.to < from || seg.from > to {
+		if seg.kind != segmentSketchBuckets || seg.to < from || seg.from > to {
 			return true
 		}
 		raw, err := seg.decodeInto(buf.raw)
@@ -344,11 +344,11 @@ func (s series) histogramBucketValues(
 			decodeErr = err
 			return false
 		}
-		decodeErr = scanHistogramBuckets(raw, seg.count, func(at uint64, data []byte) error {
+		decodeErr = scanSketchBuckets(raw, seg.count, func(at uint64, data []byte) error {
 			if at < from || at > to {
 				return nil
 			}
-			stored, err := storedHistogram(data)
+			stored, err := storedSketch(data)
 			if err != nil {
 				return err
 			}
@@ -357,7 +357,7 @@ func (s series) histogramBucketValues(
 			encoded := arena[start:len(arena):len(arena)]
 			stored.data = encoded
 			if !yield(blockTime(at), stored) {
-				return errStopHistogram
+				return errStopSketch
 			}
 			return nil
 		})
@@ -366,21 +366,21 @@ func (s series) histogramBucketValues(
 	switch {
 	case err != nil:
 		return err
-	case decodeErr == errStopHistogram:
+	case decodeErr == errStopSketch:
 		return nil
 	default:
 		return decodeErr
 	}
 }
 
-func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time, Histogram) bool) error {
-	values := make(map[uint64]*histogramValue)
-	get := func(t uint64) *histogramValue {
+func (s series) sketchMixedRange(from, to, span uint64, yield func(time.Time, Sketch) bool) error {
+	values := make(map[uint64]*sketchValue)
+	get := func(t uint64) *sketchValue {
 		if span > 0 {
 			t = bucketOf(t, span)
 		}
 		if values[t] == nil {
-			values[t] = new(histogramValue)
+			values[t] = new(sketchValue)
 		}
 		return values[t]
 	}
@@ -391,7 +391,7 @@ func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time,
 	defer putEncodeBuffer(buf)
 	err := s.scan(func(seg segment) bool {
 		switch {
-		case seg.kind != segmentHistograms && seg.kind != segmentHistogramBuckets:
+		case seg.kind != segmentSketches && seg.kind != segmentSketchBuckets:
 			return true
 		case seg.to < from || seg.from > to:
 			return true
@@ -403,7 +403,7 @@ func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time,
 			return false
 		}
 		switch seg.kind {
-		case segmentHistograms:
+		case segmentSketches:
 			decodeErr = decodeSampleValues(raw, times[:seg.count], observations[:seg.count])
 			if decodeErr == nil {
 				for i, t := range times[:seg.count] {
@@ -416,8 +416,8 @@ func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time,
 					}
 				}
 			}
-		case segmentHistogramBuckets:
-			decodeErr = scanHistogramBuckets(raw, seg.count, func(t uint64, data []byte) error {
+		case segmentSketchBuckets:
+			decodeErr = scanSketchBuckets(raw, seg.count, func(t uint64, data []byte) error {
 				if t < from || t > to {
 					return nil
 				}

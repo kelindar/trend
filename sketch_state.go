@@ -9,39 +9,39 @@ import (
 	"slices"
 )
 
-var errStopHistogram = errors.New("trend: stop histogram iteration")
+var errStopSketch = errors.New("trend: stop sketch iteration")
 
 const (
-	histogramExact    = byte(1)
-	histogramApprox   = byte(2)
-	histogramExactXOR = byte(3)
-	histogramMaxBins  = 1024
-	histogramAlpha    = 0.01
-	histogramBinAlpha = 0.009999
-	histogramGamma    = (1 + histogramBinAlpha) / (1 - histogramBinAlpha)
+	sketchExact    = byte(1)
+	sketchApprox   = byte(2)
+	sketchExactXOR = byte(3)
+	sketchMaxBins  = 1024
+	sketchAlpha    = 0.01
+	sketchBinAlpha = 0.009999
+	sketchGamma    = (1 + sketchBinAlpha) / (1 - sketchBinAlpha)
 )
 
-var histogramScale = 1 / math.Log(histogramGamma)
+var sketchScale = 1 / math.Log(sketchGamma)
 
-type histogramOp struct {
+type sketchOp struct {
 	replica uint64
 	clock   uint64
 }
 
-type histogramData struct {
+type sketchData struct {
 	Time    []uint64
 	Data    []float64
 	Clock   []uint64
 	Replica []uint64
-	Buckets []histogramBucket
+	Buckets []sketchBucket
 }
 
-type histogramBucket struct {
+type sketchBucket struct {
 	Time uint64
 	Data []byte
 }
 
-type histogramValue struct {
+type sketchValue struct {
 	count    uint64
 	sum      float64
 	min      float64
@@ -52,14 +52,14 @@ type histogramValue struct {
 	positive map[int]uint64
 }
 
-func (d *histogramData) Add(t uint64, value float64, clock, replica uint64) {
+func (d *sketchData) Add(t uint64, value float64, clock, replica uint64) {
 	d.Time = append(d.Time, t)
 	d.Data = append(d.Data, value)
 	d.Clock = append(d.Clock, clock)
 	d.Replica = append(d.Replica, replica)
 }
 
-func (d *histogramData) Reset() {
+func (d *sketchData) Reset() {
 	d.Time = d.Time[:0]
 	d.Data = d.Data[:0]
 	d.Clock = d.Clock[:0]
@@ -67,15 +67,15 @@ func (d *histogramData) Reset() {
 	d.Buckets = d.Buckets[:0]
 }
 
-func (d histogramData) count() int {
+func (d sketchData) count() int {
 	return len(d.Time) + len(d.Buckets)
 }
 
-func (d histogramData) appendable() bool {
-	return nondecreasing(d.Time) && histogramBucketsIncreasing(d.Buckets)
+func (d sketchData) appendable() bool {
+	return nondecreasing(d.Time) && sketchBucketsIncreasing(d.Buckets)
 }
 
-func (d histogramData) minTime() (uint64, bool) {
+func (d sketchData) minTime() (uint64, bool) {
 	var out uint64
 	var ok bool
 	for _, t := range d.Time {
@@ -93,7 +93,7 @@ func (d histogramData) minTime() (uint64, bool) {
 	return out, ok
 }
 
-func histogramBucketsIncreasing(buckets []histogramBucket) bool {
+func sketchBucketsIncreasing(buckets []sketchBucket) bool {
 	for i := 1; i < len(buckets); i++ {
 		if buckets[i].Time <= buckets[i-1].Time {
 			return false
@@ -102,13 +102,13 @@ func histogramBucketsIncreasing(buckets []histogramBucket) bool {
 	return true
 }
 
-func (d *histogramData) Merge(delta histogramData) {
-	ops := make(map[uint64]map[histogramOp]uint64, len(d.Time)+len(delta.Time))
+func (d *sketchData) Merge(delta sketchData) {
+	ops := make(map[uint64]map[sketchOp]uint64, len(d.Time)+len(delta.Time))
 	add := func(t, replica, clock uint64, value float64) {
 		if ops[t] == nil {
-			ops[t] = make(map[histogramOp]uint64)
+			ops[t] = make(map[sketchOp]uint64)
 		}
-		op := histogramOp{replica: replica, clock: clock}
+		op := sketchOp{replica: replica, clock: clock}
 		bits := math.Float64bits(value)
 		if previous, ok := ops[t][op]; !ok || bits > previous {
 			ops[t][op] = bits
@@ -130,15 +130,15 @@ func (d *histogramData) Merge(delta histogramData) {
 			d.Add(t, math.Float64frombits(value), op.clock, op.replica)
 		}
 	}
-	d.Buckets = mergeHistogramBuckets(d.Buckets, delta.Buckets)
+	d.Buckets = mergeSketchBuckets(d.Buckets, delta.Buckets)
 }
 
-func mergeHistogramBuckets(a, b []histogramBucket) []histogramBucket {
-	buckets := make(map[uint64]*histogramValue, len(a)+len(b))
-	merge := func(items []histogramBucket) {
+func mergeSketchBuckets(a, b []sketchBucket) []sketchBucket {
+	buckets := make(map[uint64]*sketchValue, len(a)+len(b))
+	merge := func(items []sketchBucket) {
 		for _, x := range items {
 			if buckets[x.Time] == nil {
-				buckets[x.Time] = new(histogramValue)
+				buckets[x.Time] = new(sketchValue)
 			}
 			_ = buckets[x.Time].mergeBytes(x.Data)
 		}
@@ -146,20 +146,20 @@ func mergeHistogramBuckets(a, b []histogramBucket) []histogramBucket {
 	merge(a)
 	merge(b)
 	times := sortedTimes(buckets)
-	out := make([]histogramBucket, 0, len(times))
+	out := make([]sketchBucket, 0, len(times))
 	for _, t := range times {
-		out = append(out, histogramBucket{Time: t, Data: buckets[t].encodeApprox()})
+		out = append(out, sketchBucket{Time: t, Data: buckets[t].encodeApprox()})
 	}
 	return out
 }
 
-func (d *histogramData) Compact(cutoff, span uint64) {
+func (d *sketchData) Compact(cutoff, span uint64) {
 	if len(d.Time) == 0 {
 		return
 	}
-	buckets := make(map[uint64]*histogramValue, len(d.Buckets))
+	buckets := make(map[uint64]*sketchValue, len(d.Buckets))
 	for _, b := range d.Buckets {
-		v := new(histogramValue)
+		v := new(sketchValue)
 		_ = v.mergeBytes(b.Data)
 		buckets[b.Time] = v
 	}
@@ -175,7 +175,7 @@ func (d *histogramData) Compact(cutoff, span uint64) {
 		}
 		bt := bucketOf(t, span)
 		if buckets[bt] == nil {
-			buckets[bt] = new(histogramValue)
+			buckets[bt] = new(sketchValue)
 		}
 		buckets[bt].addApprox(d.Data[i])
 	}
@@ -186,11 +186,11 @@ func (d *histogramData) Compact(cutoff, span uint64) {
 	times := sortedTimes(buckets)
 	d.Buckets = d.Buckets[:0]
 	for _, t := range times {
-		d.Buckets = append(d.Buckets, histogramBucket{Time: t, Data: buckets[t].encodeApprox()})
+		d.Buckets = append(d.Buckets, sketchBucket{Time: t, Data: buckets[t].encodeApprox()})
 	}
 }
 
-func (v *histogramValue) addStats(value float64) {
+func (v *sketchValue) addStats(value float64) {
 	if v.count == 0 {
 		v.min, v.max = value, value
 	}
@@ -204,23 +204,23 @@ func (v *histogramValue) addStats(value float64) {
 	}
 }
 
-func (v *histogramValue) addExact(value float64) {
+func (v *sketchValue) addExact(value float64) {
 	v.addStats(value)
 	v.exact = append(v.exact, value)
 }
 
-func (v *histogramValue) addApprox(value float64) {
+func (v *sketchValue) addApprox(value float64) {
 	v.addStats(value)
 	v.addBin(value, 1)
 	v.collapse()
 }
 
-func (v *histogramValue) addBin(value float64, count uint64) {
+func (v *sketchValue) addBin(value float64, count uint64) {
 	if value == 0 {
 		v.zero += count
 		return
 	}
-	key := int(math.Ceil(math.Log(math.Abs(value)) * histogramScale))
+	key := int(math.Ceil(math.Log(math.Abs(value)) * sketchScale))
 	if value < 0 {
 		if v.negative == nil {
 			v.negative = make(map[int]uint64)
@@ -234,7 +234,7 @@ func (v *histogramValue) addBin(value float64, count uint64) {
 	v.positive[key] += count
 }
 
-func (v *histogramValue) approximate() {
+func (v *sketchValue) approximate() {
 	if v.exact == nil {
 		return
 	}
@@ -245,8 +245,8 @@ func (v *histogramValue) approximate() {
 	v.collapse()
 }
 
-func (v *histogramValue) collapse() {
-	for len(v.negative)+len(v.positive) > histogramMaxBins {
+func (v *sketchValue) collapse() {
+	for len(v.negative)+len(v.positive) > sketchMaxBins {
 		nk, hasNegative := minKey(v.negative)
 		pk, hasPositive := minKey(v.positive)
 		if hasNegative && (!hasPositive || nk <= pk) {
@@ -270,8 +270,8 @@ func minKey(values map[int]uint64) (int, bool) {
 	return out, ok
 }
 
-func (v *histogramValue) mergeBytes(data []byte) error {
-	other, err := decodeHistogram(data)
+func (v *sketchValue) mergeBytes(data []byte) error {
+	other, err := decodeSketch(data)
 	if err != nil {
 		return err
 	}
@@ -314,16 +314,16 @@ func (v *histogramValue) mergeBytes(data []byte) error {
 	return nil
 }
 
-func (v *histogramValue) encode() Histogram {
+func (v *sketchValue) encode() Sketch {
 	if v.exact != nil {
 		slices.Sort(v.exact)
-		return v.histogram(histogramExact, appendExactValues(nil, v.exact))
+		return v.sketch(sketchExact, appendExactValues(nil, v.exact))
 	}
-	return v.histogram(histogramApprox, appendHistogramApproxData(nil, v))
+	return v.sketch(sketchApprox, appendSketchApproxData(nil, v))
 }
 
-func (v *histogramValue) histogram(kind byte, data []byte) Histogram {
-	return Histogram{
+func (v *sketchValue) sketch(kind byte, data []byte) Sketch {
+	return Sketch{
 		data:  data,
 		count: v.count,
 		sum:   v.sum,
@@ -333,13 +333,13 @@ func (v *histogramValue) histogram(kind byte, data []byte) Histogram {
 	}
 }
 
-func (v *histogramValue) encodeApprox() []byte {
+func (v *sketchValue) encodeApprox() []byte {
 	v.approximate()
-	return appendHistogramApprox(nil, v)
+	return appendSketchApprox(nil, v)
 }
 
-func histogramBinValue(key int) float64 {
-	return 2 * math.Pow(histogramGamma, float64(key)) / (histogramGamma + 1)
+func sketchBinValue(key int) float64 {
+	return 2 * math.Pow(sketchGamma, float64(key)) / (sketchGamma + 1)
 }
 
 func sortedIntKeys(values map[int]uint64) []int {
@@ -351,7 +351,7 @@ func sortedIntKeys(values map[int]uint64) []int {
 	return keys
 }
 
-func appendHistogramHeader(dst []byte, kind byte, v *histogramValue) []byte {
+func appendSketchHeader(dst []byte, kind byte, v *sketchValue) []byte {
 	dst = append(dst, kind)
 	dst = appendUvarint(dst, v.count)
 	dst, _ = appendFloat(dst, v.sum, 0)
@@ -360,23 +360,23 @@ func appendHistogramHeader(dst []byte, kind byte, v *histogramValue) []byte {
 	return dst
 }
 
-func appendHistogramExact(dst []byte, v *histogramValue) []byte {
-	dst = appendHistogramHeader(dst, histogramExact, v)
+func appendSketchExact(dst []byte, v *sketchValue) []byte {
+	dst = appendSketchHeader(dst, sketchExact, v)
 	return appendFloatXor(dst, v.exact)
 }
 
-func appendHistogramApprox(dst []byte, v *histogramValue) []byte {
-	dst = appendHistogramHeader(dst, histogramApprox, v)
-	return appendHistogramApproxData(dst, v)
+func appendSketchApprox(dst []byte, v *sketchValue) []byte {
+	dst = appendSketchHeader(dst, sketchApprox, v)
+	return appendSketchApproxData(dst, v)
 }
 
-func appendHistogramApproxData(dst []byte, v *histogramValue) []byte {
+func appendSketchApproxData(dst []byte, v *sketchValue) []byte {
 	dst = appendUvarint(dst, v.zero)
-	dst = appendHistogramBins(dst, v.negative)
-	return appendHistogramBins(dst, v.positive)
+	dst = appendSketchBins(dst, v.negative)
+	return appendSketchBins(dst, v.positive)
 }
 
-func appendHistogramBins(dst []byte, bins map[int]uint64) []byte {
+func appendSketchBins(dst []byte, bins map[int]uint64) []byte {
 	keys := sortedIntKeys(bins)
 	dst = appendUvarint(dst, uint64(len(keys)))
 	var previous int64
@@ -397,98 +397,98 @@ func appendVarint(dst []byte, value int64) []byte {
 	return appendUvarint(dst, uint64(value<<1)^uint64(value>>63))
 }
 
-func decodeHistogram(data []byte) (histogramValue, error) {
-	kind, out, r, err := decodeHistogramHeader(data)
+func decodeSketch(data []byte) (sketchValue, error) {
+	kind, out, r, err := decodeSketchHeader(data)
 	switch {
 	case err != nil:
-		return histogramValue{}, err
+		return sketchValue{}, err
 	case kind == 0:
 		return out, nil
 	}
 	switch kind {
-	case histogramExact:
+	case sketchExact:
 		if out.count > uint64(int(^uint(0)>>1)) {
-			return histogramValue{}, errLargeCodec
+			return sketchValue{}, errLargeCodec
 		}
 		out.exact = make([]float64, int(out.count))
 		r.floatXor(out.exact)
-	case histogramApprox:
+	case sketchApprox:
 		out.zero = r.uvarint()
-		out.negative = r.histogramBins()
-		out.positive = r.histogramBins()
+		out.negative = r.sketchBins()
+		out.positive = r.sketchBins()
 	default:
-		return histogramValue{}, errVarintCodec
+		return sketchValue{}, errVarintCodec
 	}
 	if err := r.done(); err != nil {
-		return histogramValue{}, err
+		return sketchValue{}, err
 	}
 	switch {
-	case len(out.negative)+len(out.positive) > histogramMaxBins:
-		return histogramValue{}, errLargeCodec
+	case len(out.negative)+len(out.positive) > sketchMaxBins:
+		return sketchValue{}, errLargeCodec
 	case out.count != uint64(len(out.exact))+out.zero+sumBins(out.negative)+sumBins(out.positive):
-		return histogramValue{}, errShapeCodec
+		return sketchValue{}, errShapeCodec
 	}
 	return out, nil
 }
 
-func storedHistogram(data []byte) (Histogram, error) {
-	kind, out, r, err := decodeHistogramHeader(data)
+func storedSketch(data []byte) (Sketch, error) {
+	kind, out, r, err := decodeSketchHeader(data)
 	if err != nil {
-		return Histogram{}, err
+		return Sketch{}, err
 	}
 	payload := r.data
 	var count uint64
 	switch kind {
-	case histogramExact:
+	case sketchExact:
 		for range out.count {
 			r.uvarint()
 		}
 		count = out.count
-	case histogramApprox:
+	case sketchApprox:
 		count = r.uvarint()
 		var bins int
-		r.histogramBinsEach(func(_ int, n uint64) bool {
+		r.sketchBinsEach(func(_ int, n uint64) bool {
 			count += n
 			bins++
 			return true
 		})
-		r.histogramBinsEach(func(_ int, n uint64) bool {
+		r.sketchBinsEach(func(_ int, n uint64) bool {
 			count += n
 			bins++
 			return true
 		})
-		if bins > histogramMaxBins {
-			return Histogram{}, errLargeCodec
+		if bins > sketchMaxBins {
+			return Sketch{}, errLargeCodec
 		}
 	default:
-		return Histogram{}, errVarintCodec
+		return Sketch{}, errVarintCodec
 	}
 	if err := r.done(); err != nil {
-		return Histogram{}, err
+		return Sketch{}, err
 	}
 	if count != out.count {
-		return Histogram{}, errShapeCodec
+		return Sketch{}, errShapeCodec
 	}
-	if kind == histogramExact {
-		kind = histogramExactXOR
+	if kind == sketchExact {
+		kind = sketchExactXOR
 	}
-	return out.histogram(kind, payload), nil
+	return out.sketch(kind, payload), nil
 }
 
-func decodeHistogramHeader(data []byte) (byte, histogramValue, codecReader, error) {
+func decodeSketchHeader(data []byte) (byte, sketchValue, codecReader, error) {
 	if len(data) == 0 {
-		return 0, histogramValue{}, codecReader{}, nil
+		return 0, sketchValue{}, codecReader{}, nil
 	}
 	r := codecReader{data: data}
 	kind := r.byte()
-	out := histogramValue{
+	out := sketchValue{
 		count: r.uvarint(),
 		sum:   r.float(),
 		min:   r.float(),
 		max:   r.float(),
 	}
 	if r.err != nil {
-		return 0, histogramValue{}, codecReader{}, r.err
+		return 0, sketchValue{}, codecReader{}, r.err
 	}
 	return kind, out, r, nil
 }
@@ -497,18 +497,18 @@ func (r *codecReader) float() float64 {
 	return floatFromReversed(r.uvarint())
 }
 
-func (r *codecReader) histogramBins() map[int]uint64 {
+func (r *codecReader) sketchBins() map[int]uint64 {
 	out := make(map[int]uint64)
-	r.histogramBinsEach(func(key int, count uint64) bool {
+	r.sketchBinsEach(func(key int, count uint64) bool {
 		out[key] = count
 		return true
 	})
 	return out
 }
 
-func (r *codecReader) histogramBinsEach(yield func(int, uint64) bool) {
+func (r *codecReader) sketchBinsEach(yield func(int, uint64) bool) {
 	n := r.count()
-	if n > histogramMaxBins {
+	if n > sketchMaxBins {
 		r.err = errLargeCodec
 		return
 	}

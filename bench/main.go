@@ -133,28 +133,28 @@ func cases() []benchCase {
 			},
 		},
 		{
-			name: "histograms/append",
+			name: "sketches/append",
 			setup: func() func(int) {
-				store, seed := seedHistogramStore(ctx, "histograms")
-				db := newMemoryDB(store, trend.WithReplica("histograms-append"), trend.WithFlushEvery(time.Hour))
-				histograms := db.Histograms("histograms")
+				store, seed := seedSketchStore(ctx, "sketches")
+				db := newMemoryDB(store, trend.WithReplica("sketches-append"), trend.WithFlushEvery(time.Hour))
+				sketches := db.Sketches("sketches")
 				return func(int) {
-					store.Set("h:histograms", seed)
+					store.Set("h:sketches", seed)
 					for i := range benchCount {
 						at := time.Unix(int64(benchCount+i), 0)
-						must(histograms.Add(ctx, at, float64(i)))
+						must(sketches.Add(ctx, at, float64(i)))
 					}
 					must(db.Flush(ctx))
 				}
 			},
 		},
 		{
-			name: "histograms/range",
+			name: "sketches/range",
 			setup: func() func(int) {
-				store, _ := seedHistogramStore(ctx, "histograms")
-				histograms := newMemoryDB(store).Histograms("histograms")
+				store, _ := seedSketchStore(ctx, "sketches")
+				sketches := newMemoryDB(store).Sketches("sketches")
 				return func(int) {
-					values, err := histograms.Range(ctx, from, to, time.Minute)
+					values, err := sketches.Range(ctx, from, to, time.Minute)
 					must(err)
 					for _, value := range values {
 						_ = value.Quantile(0.99)
@@ -163,12 +163,12 @@ func cases() []benchCase {
 			},
 		},
 		{
-			name: "histograms/values",
+			name: "sketches/values",
 			setup: func() func(int) {
-				store, _ := seedHistogramStore(ctx, "histograms")
-				histograms := newMemoryDB(store).Histograms("histograms")
+				store, _ := seedSketchStore(ctx, "sketches")
+				sketches := newMemoryDB(store).Sketches("sketches")
 				return func(int) {
-					values, err := histograms.Values(ctx, from, to)
+					values, err := sketches.Values(ctx, from, to)
 					must(err)
 					for _, value := range values {
 						_ = value.Count()
@@ -249,10 +249,10 @@ func seedCounterStore(ctx context.Context, key string) (*memoryStore, []byte) {
 	return store, raw
 }
 
-func seedHistogramStore(ctx context.Context, key string) (*memoryStore, []byte) {
+func seedSketchStore(ctx context.Context, key string) (*memoryStore, []byte) {
 	store := newMemoryStore()
 	db := newMemoryDB(store, trend.WithReplica(key+"-seed"), trend.WithFlushEvery(time.Hour))
-	seedHistograms(ctx, db, key, benchCount)
+	seedSketches(ctx, db, key, benchCount)
 	must(db.Close())
 	raw, err := store.Load(ctx, "h:"+key)
 	must(err)
@@ -274,9 +274,9 @@ func seedCounters(ctx context.Context, db *trend.DB, key string, count int) {
 	must(db.Flush(ctx))
 }
 
-func seedHistograms(ctx context.Context, db *trend.DB, key string, count int) {
+func seedSketches(ctx context.Context, db *trend.DB, key string, count int) {
 	for i := range count {
-		must(db.Histograms(key).Add(ctx, time.Unix(int64(i), 0), float64(i)))
+		must(db.Sketches(key).Add(ctx, time.Unix(int64(i), 0), float64(i)))
 	}
 	must(db.Flush(ctx))
 }

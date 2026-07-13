@@ -23,8 +23,8 @@ const (
 	segmentCounters
 	segmentSampleBuckets
 	segmentCounterBuckets
-	segmentHistograms
-	segmentHistogramBuckets
+	segmentSketches
+	segmentSketchBuckets
 )
 
 var (
@@ -167,8 +167,8 @@ func (p *pending) appendTo(dst []byte) ([]byte, error) {
 	dst = appendSampleSegments(dst, p.Samples, buf)
 	dst = appendCounterBucketSegments(dst, p.Counters.Buckets, buf)
 	dst = appendCounterSegments(dst, p.Counters, buf)
-	dst = appendHistogramBucketSegments(dst, p.Histograms.Buckets, buf)
-	return appendHistogramSegments(dst, p.Histograms, buf), nil
+	dst = appendSketchBucketSegments(dst, p.Sketches.Buckets, buf)
+	return appendSketchSegments(dst, p.Sketches, buf), nil
 }
 
 func (p *pending) valid() error {
@@ -181,9 +181,9 @@ func (p *pending) valid() error {
 		len(p.Counters.Time) != len(p.Counters.Replica) ||
 		len(p.Counters.Time) != len(p.Counters.Clock) ||
 		len(p.Counters.Time) != len(p.Counters.Value) ||
-		len(p.Histograms.Time) != len(p.Histograms.Data) ||
-		len(p.Histograms.Time) != len(p.Histograms.Clock) ||
-		len(p.Histograms.Time) != len(p.Histograms.Replica) {
+		len(p.Sketches.Time) != len(p.Sketches.Data) ||
+		len(p.Sketches.Time) != len(p.Sketches.Clock) ||
+		len(p.Sketches.Time) != len(p.Sketches.Replica) {
 		return errShapeCodec
 	}
 	return nil
@@ -215,7 +215,7 @@ func (s series) scan(yield func(segment) bool) error {
 		}
 		switch seg.kind {
 		case segmentSamples, segmentCounters, segmentSampleBuckets, segmentCounterBuckets,
-			segmentHistograms, segmentHistogramBuckets:
+			segmentSketches, segmentSketchBuckets:
 		default:
 			return errVarintCodec
 		}
@@ -236,10 +236,10 @@ func (seg segment) applyRaw(out *pending, raw []byte) error {
 		return decodeSampleBuckets(raw, seg.count, &out.Samples)
 	case segmentCounterBuckets:
 		return decodeCounterBuckets(raw, seg.count, &out.Counters)
-	case segmentHistograms:
-		return decodeHistograms(raw, seg.count, &out.Histograms)
-	case segmentHistogramBuckets:
-		return decodeHistogramBuckets(raw, seg.count, &out.Histograms)
+	case segmentSketches:
+		return decodeSketches(raw, seg.count, &out.Sketches)
+	case segmentSketchBuckets:
+		return decodeSketchBuckets(raw, seg.count, &out.Sketches)
 	default:
 		return errVarintCodec
 	}
