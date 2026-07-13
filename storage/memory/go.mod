@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/allegro/bigcache/v3 v3.1.0
-	github.com/kelindar/trend v0.0.0
+	github.com/kelindar/trend v0.2.0
 	github.com/stretchr/testify v1.11.1
 )
 

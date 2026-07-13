@@ -3,8 +3,8 @@ module github.com/kelindar/trend/storage/sqlite
 go 1.25.0
 
 require (
-	github.com/kelindar/trend v0.0.0
-	github.com/kelindar/trend/storage/memory v0.0.0
+	github.com/kelindar/trend v0.2.0
+	github.com/kelindar/trend/storage/memory v0.1.0
 	github.com/ncruces/go-sqlite3 v0.35.1
 	github.com/stretchr/testify v1.11.1
 )
