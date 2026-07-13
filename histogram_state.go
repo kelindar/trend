@@ -399,10 +399,10 @@ func appendVarint(dst []byte, value int64) []byte {
 
 func decodeHistogram(data []byte) (histogramValue, error) {
 	kind, out, r, err := decodeHistogramHeader(data)
-	if err != nil {
+	switch {
+	case err != nil:
 		return histogramValue{}, err
-	}
-	if kind == 0 {
+	case kind == 0:
 		return out, nil
 	}
 	switch kind {
@@ -422,10 +422,10 @@ func decodeHistogram(data []byte) (histogramValue, error) {
 	if err := r.done(); err != nil {
 		return histogramValue{}, err
 	}
-	if len(out.negative)+len(out.positive) > histogramMaxBins {
+	switch {
+	case len(out.negative)+len(out.positive) > histogramMaxBins:
 		return histogramValue{}, errLargeCodec
-	}
-	if out.count != uint64(len(out.exact))+out.zero+sumBins(out.negative)+sumBins(out.positive) {
+	case out.count != uint64(len(out.exact))+out.zero+sumBins(out.negative)+sumBins(out.positive):
 		return histogramValue{}, errShapeCodec
 	}
 	return out, nil

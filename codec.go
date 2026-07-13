@@ -106,10 +106,10 @@ func (s series) valid() error {
 }
 
 func (s series) versionOK() error {
-	if len(s) == 0 {
+	switch {
+	case len(s) == 0:
 		return nil
-	}
-	if s[0] != version {
+	case s[0] != version:
 		return fmt.Errorf("trend: unsupported version %d", s[0])
 	}
 	return nil
@@ -190,10 +190,10 @@ func (p *pending) valid() error {
 }
 
 func (s series) scan(yield func(segment) bool) error {
-	if len(s) == 0 {
+	switch {
+	case len(s) == 0:
 		return nil
-	}
-	if s[0] != version {
+	case s[0] != version:
 		return fmt.Errorf("trend: unsupported version %d", s[0])
 	}
 	r := codecReader{data: s[1:]}

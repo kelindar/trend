@@ -104,13 +104,12 @@ func (h Histogram) Mean() float64 {
 
 // Quantile returns the nearest-rank quantile, or NaN for an invalid quantile.
 func (h Histogram) Quantile(q float64) float64 {
-	if h.count == 0 || math.IsNaN(q) || q < 0 || q > 1 {
+	switch {
+	case h.count == 0 || math.IsNaN(q) || q < 0 || q > 1:
 		return math.NaN()
-	}
-	if q == 0 {
+	case q == 0:
 		return h.min
-	}
-	if q == 1 {
+	case q == 1:
 		return h.max
 	}
 	r := codecReader{data: h.data}
@@ -216,16 +215,16 @@ func (s series) histogramRange(from, to, span uint64, yield func(time.Time, Hist
 		}
 		return true
 	})
-	if err != nil || !hasRaw && !hasBuckets {
+	switch {
+	case err != nil || !hasRaw && !hasBuckets:
 		return err
-	}
-	if !hasBuckets {
+	case !hasBuckets:
 		return s.histogramRawRange(from, to, span, rawCount, yield)
-	}
-	if !hasRaw && span == 0 {
+	case !hasRaw && span == 0:
 		return s.histogramBucketValues(from, to, bucketBytes, yield)
+	default:
+		return s.histogramMixedRange(from, to, span, yield)
 	}
-	return s.histogramMixedRange(from, to, span, yield)
 }
 
 func (s series) histogramRawRange(
@@ -314,10 +313,10 @@ func (s series) histogramRawRange(
 		}
 		return true
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
-	}
-	if decodeErr != nil {
+	case decodeErr != nil:
 		return decodeErr
 	}
 	if !stopped {
@@ -364,13 +363,14 @@ func (s series) histogramBucketValues(
 		})
 		return decodeErr == nil
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
-	}
-	if decodeErr == errStopHistogram {
+	case decodeErr == errStopHistogram:
 		return nil
+	default:
+		return decodeErr
 	}
-	return decodeErr
 }
 
 func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time, Histogram) bool) error {
@@ -390,10 +390,10 @@ func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time,
 	buf := encodeBuffers.Get().(*codecBuffer)
 	defer putEncodeBuffer(buf)
 	err := s.scan(func(seg segment) bool {
-		if seg.kind != segmentHistograms && seg.kind != segmentHistogramBuckets {
+		switch {
+		case seg.kind != segmentHistograms && seg.kind != segmentHistogramBuckets:
 			return true
-		}
-		if seg.to < from || seg.from > to {
+		case seg.to < from || seg.from > to:
 			return true
 		}
 		raw, err := seg.decodeInto(buf.raw)
@@ -426,10 +426,10 @@ func (s series) histogramMixedRange(from, to, span uint64, yield func(time.Time,
 		}
 		return decodeErr == nil
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
-	}
-	if decodeErr != nil {
+	case decodeErr != nil:
 		return decodeErr
 	}
 	outputTimes := make([]uint64, 0, len(values))

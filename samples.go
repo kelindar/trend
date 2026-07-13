@@ -178,10 +178,10 @@ func (s series) sampleRange(from, to, span uint64, agg Agg, yield func(time.Time
 		}
 		return true
 	})
-	if err != nil {
+	switch {
+	case err != nil:
 		return err
-	}
-	if decodeErr != nil {
+	case decodeErr != nil:
 		return decodeErr
 	}
 	if f.count > 0 {
