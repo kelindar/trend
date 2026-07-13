@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// DB stores time-series samples and counters.
+// DB stores time-series samples, counters, and histograms.
 type DB struct {
 	store      Store
 	replica    uint64
@@ -68,6 +68,12 @@ func (db *DB) Samples(key string) Samples {
 func (db *DB) Counters(key string) Counters {
 	db.seen.Store(counterKey(key), struct{}{})
 	return Counters{db: db, key: counterKey(key)}
+}
+
+// Histograms returns a histogram series handle.
+func (db *DB) Histograms(key string) Histograms {
+	db.seen.Store(histogramKey(key), struct{}{})
+	return Histograms{db: db, key: histogramKey(key)}
 }
 
 // Close flushes pending writes and closes resources.
@@ -143,6 +149,17 @@ func (db *DB) writeCounter(ctx context.Context, key string, at, value uint64) er
 	return nil
 }
 
+func (db *DB) writeHistogram(ctx context.Context, key string, at uint64, value float64) error {
+	clock := db.clock.Add(1)
+	if db.buffer != nil {
+		db.buffer.addHistogram(key, at, value, clock, db.replica)
+		return nil
+	}
+	var delta pending
+	delta.Histograms.Add(at, value, clock, db.replica)
+	return db.merge(ctx, key, &delta)
+}
+
 func (db *DB) loadRaw(ctx context.Context, key string) (series, error) {
 	raw, err := db.store.Load(ctx, key)
 	if err != nil {
@@ -176,8 +193,9 @@ func (db *DB) load(ctx context.Context, key string) (series, error) {
 	return raw, nil
 }
 
-func sampleKey(key string) string  { return "s:" + key }
-func counterKey(key string) string { return "c:" + key }
+func sampleKey(key string) string    { return "s:" + key }
+func counterKey(key string) string   { return "c:" + key }
+func histogramKey(key string) string { return "h:" + key }
 
 var loadMarshal = func(p *pending) ([]byte, error) {
 	return p.marshal()
@@ -209,6 +227,12 @@ func (b *buffer) addCounter(key string, at, replica, clock, value uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.series(key).Counters.Add(at, replica, clock, value)
+}
+
+func (b *buffer) addHistogram(key string, at uint64, value float64, clock, replica uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.series(key).Histograms.Add(at, value, clock, replica)
 }
 
 func (b *buffer) clone(key string) *pending {
@@ -256,5 +280,18 @@ func clonePending(p *pending) *pending {
 	out.Counters.Clock = append(out.Counters.Clock, p.Counters.Clock...)
 	out.Counters.Value = append(out.Counters.Value, p.Counters.Value...)
 	out.Counters.Buckets = append(out.Counters.Buckets, p.Counters.Buckets...)
+	out.Histograms.Time = append(out.Histograms.Time, p.Histograms.Time...)
+	out.Histograms.Data = append(out.Histograms.Data, p.Histograms.Data...)
+	out.Histograms.Clock = append(out.Histograms.Clock, p.Histograms.Clock...)
+	out.Histograms.Replica = append(out.Histograms.Replica, p.Histograms.Replica...)
+	out.Histograms.Buckets = cloneHistogramBuckets(p.Histograms.Buckets)
+	return out
+}
+
+func cloneHistogramBuckets(buckets []histogramBucket) []histogramBucket {
+	out := make([]histogramBucket, len(buckets))
+	for i, b := range buckets {
+		out[i] = histogramBucket{Time: b.Time, Data: append([]byte(nil), b.Data...)}
+	}
 	return out
 }

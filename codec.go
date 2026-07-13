@@ -23,6 +23,8 @@ const (
 	segmentCounters
 	segmentSampleBuckets
 	segmentCounterBuckets
+	segmentHistograms
+	segmentHistogramBuckets
 )
 
 var (
@@ -164,7 +166,9 @@ func (p *pending) appendTo(dst []byte) ([]byte, error) {
 	dst = appendSampleBucketSegments(dst, p.Samples.Buckets, buf)
 	dst = appendSampleSegments(dst, p.Samples, buf)
 	dst = appendCounterBucketSegments(dst, p.Counters.Buckets, buf)
-	return appendCounterSegments(dst, p.Counters, buf), nil
+	dst = appendCounterSegments(dst, p.Counters, buf)
+	dst = appendHistogramBucketSegments(dst, p.Histograms.Buckets, buf)
+	return appendHistogramSegments(dst, p.Histograms, buf), nil
 }
 
 func (p *pending) valid() error {
@@ -176,7 +180,10 @@ func (p *pending) valid() error {
 		len(p.Samples.Time) != len(p.Samples.Replica) ||
 		len(p.Counters.Time) != len(p.Counters.Replica) ||
 		len(p.Counters.Time) != len(p.Counters.Clock) ||
-		len(p.Counters.Time) != len(p.Counters.Value) {
+		len(p.Counters.Time) != len(p.Counters.Value) ||
+		len(p.Histograms.Time) != len(p.Histograms.Data) ||
+		len(p.Histograms.Time) != len(p.Histograms.Clock) ||
+		len(p.Histograms.Time) != len(p.Histograms.Replica) {
 		return errShapeCodec
 	}
 	return nil
@@ -207,7 +214,8 @@ func (s series) scan(yield func(segment) bool) error {
 			return errLargeCodec
 		}
 		switch seg.kind {
-		case segmentSamples, segmentCounters, segmentSampleBuckets, segmentCounterBuckets:
+		case segmentSamples, segmentCounters, segmentSampleBuckets, segmentCounterBuckets,
+			segmentHistograms, segmentHistogramBuckets:
 		default:
 			return errVarintCodec
 		}
@@ -228,6 +236,10 @@ func (seg segment) applyRaw(out *pending, raw []byte) error {
 		return decodeSampleBuckets(raw, seg.count, &out.Samples)
 	case segmentCounterBuckets:
 		return decodeCounterBuckets(raw, seg.count, &out.Counters)
+	case segmentHistograms:
+		return decodeHistograms(raw, seg.count, &out.Histograms)
+	case segmentHistogramBuckets:
+		return decodeHistogramBuckets(raw, seg.count, &out.Histograms)
 	default:
 		return errVarintCodec
 	}

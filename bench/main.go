@@ -132,6 +132,50 @@ func cases() []benchCase {
 				}
 			},
 		},
+		{
+			name: "histograms/append",
+			setup: func() func(int) {
+				store, seed := seedHistogramStore(ctx, "histograms")
+				db := newMemoryDB(store, trend.WithReplica("histograms-append"), trend.WithFlushEvery(time.Hour))
+				histograms := db.Histograms("histograms")
+				return func(int) {
+					store.Set("h:histograms", seed)
+					for i := range benchCount {
+						at := time.Unix(int64(benchCount+i), 0)
+						must(histograms.Add(ctx, at, float64(i)))
+					}
+					must(db.Flush(ctx))
+				}
+			},
+		},
+		{
+			name: "histograms/range",
+			setup: func() func(int) {
+				store, _ := seedHistogramStore(ctx, "histograms")
+				histograms := newMemoryDB(store).Histograms("histograms")
+				return func(int) {
+					values, err := histograms.Range(ctx, from, to, time.Minute)
+					must(err)
+					for _, value := range values {
+						_ = value.Quantile(0.99)
+					}
+				}
+			},
+		},
+		{
+			name: "histograms/values",
+			setup: func() func(int) {
+				store, _ := seedHistogramStore(ctx, "histograms")
+				histograms := newMemoryDB(store).Histograms("histograms")
+				return func(int) {
+					values, err := histograms.Values(ctx, from, to)
+					must(err)
+					for _, value := range values {
+						_ = value.Count()
+					}
+				}
+			},
+		},
 		loadCase(ctx, "load/memory", openMemoryStore),
 		loadCase(ctx, "load/buntdb", openBuntDBStore),
 		loadCase(ctx, "load/sqlite", openSQLiteStore),
@@ -205,6 +249,16 @@ func seedCounterStore(ctx context.Context, key string) (*memoryStore, []byte) {
 	return store, raw
 }
 
+func seedHistogramStore(ctx context.Context, key string) (*memoryStore, []byte) {
+	store := newMemoryStore()
+	db := newMemoryDB(store, trend.WithReplica(key+"-seed"), trend.WithFlushEvery(time.Hour))
+	seedHistograms(ctx, db, key, benchCount)
+	must(db.Close())
+	raw, err := store.Load(ctx, "h:"+key)
+	must(err)
+	return store, raw
+}
+
 func seedSamples(ctx context.Context, db *trend.DB, key string, count int) {
 	for i := range count {
 		at := time.Unix(int64(i), 0)
@@ -216,6 +270,13 @@ func seedSamples(ctx context.Context, db *trend.DB, key string, count int) {
 func seedCounters(ctx context.Context, db *trend.DB, key string, count int) {
 	for i := range count {
 		must(db.Counters(key).Add(ctx, time.Unix(int64(i), 0), uint64(i+1)))
+	}
+	must(db.Flush(ctx))
+}
+
+func seedHistograms(ctx context.Context, db *trend.DB, key string, count int) {
+	for i := range count {
+		must(db.Histograms(key).Add(ctx, time.Unix(int64(i), 0), float64(i)))
 	}
 	must(db.Flush(ctx))
 }

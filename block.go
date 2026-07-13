@@ -35,6 +35,19 @@ func appendCounterSegments(dst []byte, data counterData, buf *codecBuffer) []byt
 	return dst
 }
 
+func appendHistogramSegments(dst []byte, data histogramData, buf *codecBuffer) []byte {
+	times, values, clocks, replicas := data.Time, data.Data, data.Clock, data.Replica
+	for len(times) > 0 {
+		n := min(len(times), segmentSize)
+		buf.raw = appendSampleRaw(buf.raw[:0], times[:n], values[:n], clocks[:n], replicas[:n])
+		from, to := times[0], times[n-1]
+		dst = appendSegment(dst, segmentHistograms, from, to, n, buf.raw, buf)
+		times, values = times[n:], values[n:]
+		clocks, replicas = clocks[n:], replicas[n:]
+	}
+	return dst
+}
+
 func appendSampleBucketSegments(dst []byte, buckets []sampleBucket, buf *codecBuffer) []byte {
 	for len(buckets) > 0 {
 		n := min(len(buckets), segmentSize)
@@ -52,6 +65,17 @@ func appendCounterBucketSegments(dst []byte, buckets []counterBucket, buf *codec
 		buf.raw = appendCounterBuckets(buf.raw[:0], buckets[:n])
 		from, to := buckets[0].Time, buckets[n-1].Time
 		dst = appendSegment(dst, segmentCounterBuckets, from, to, n, buf.raw, buf)
+		buckets = buckets[n:]
+	}
+	return dst
+}
+
+func appendHistogramBucketSegments(dst []byte, buckets []histogramBucket, buf *codecBuffer) []byte {
+	for len(buckets) > 0 {
+		n := min(len(buckets), segmentSize)
+		buf.raw = appendHistogramBuckets(buf.raw[:0], buckets[:n])
+		from, to := buckets[0].Time, buckets[n-1].Time
+		dst = appendSegment(dst, segmentHistogramBuckets, from, to, n, buf.raw, buf)
 		buckets = buckets[n:]
 	}
 	return dst
@@ -116,6 +140,17 @@ func appendCounterBuckets(dst []byte, buckets []counterBucket) []byte {
 	return dst
 }
 
+func appendHistogramBuckets(dst []byte, buckets []histogramBucket) []byte {
+	var previous uint64
+	for _, b := range buckets {
+		dst = appendUvarint(dst, b.Time-previous)
+		dst = appendUvarint(dst, uint64(len(b.Data)))
+		dst = append(dst, b.Data...)
+		previous = b.Time
+	}
+	return dst
+}
+
 func decodeSamples(raw []byte, n int, out *sampleData) error {
 	var data []float64
 	timeData := make([]uint64, n)
@@ -144,6 +179,26 @@ func decodeCounters(raw []byte, n int, out *counterData) error {
 	out.Replica = append(out.Replica, replica...)
 	out.Clock = append(out.Clock, clock...)
 	out.Value = append(out.Value, value...)
+	return nil
+}
+
+func decodeHistograms(raw []byte, n int, out *histogramData) error {
+	timeData := make([]uint64, n)
+	data := make([]float64, n)
+	clock := make([]uint64, n)
+	replica := make([]uint64, n)
+	if err := decodeSampleRaw(raw, timeData, data, clock, replica); err != nil {
+		return err
+	}
+	for _, value := range data {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return errShapeCodec
+		}
+	}
+	out.Time = append(out.Time, timeData...)
+	out.Data = append(out.Data, data...)
+	out.Clock = append(out.Clock, clock...)
+	out.Replica = append(out.Replica, replica...)
 	return nil
 }
 
@@ -211,6 +266,32 @@ func decodeCounterBuckets(raw []byte, n int, out *counterData) error {
 		prevTime += r.uvarint()
 		prevSum += r.uvarint()
 		out.Buckets = append(out.Buckets, counterBucket{Time: prevTime, Sum: prevSum})
+	}
+	return r.done()
+}
+
+func decodeHistogramBuckets(raw []byte, n int, out *histogramData) error {
+	return scanHistogramBuckets(raw, n, func(t uint64, data []byte) error {
+		out.Buckets = append(out.Buckets, histogramBucket{
+			Time: t,
+			Data: append([]byte(nil), data...),
+		})
+		return nil
+	})
+}
+
+func scanHistogramBuckets(raw []byte, n int, yield func(uint64, []byte) error) error {
+	var previous uint64
+	r := codecReader{data: raw}
+	for range n {
+		previous += r.uvarint()
+		data := r.bytes(r.count())
+		if r.err != nil {
+			return r.err
+		}
+		if err := yield(previous, data); err != nil {
+			return err
+		}
 	}
 	return r.done()
 }

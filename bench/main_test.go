@@ -31,10 +31,13 @@ func TestCases(t *testing.T) {
 		"counters/append",
 		"counters/range",
 		"counters/values",
-		"store/load/memory",
-		"store/load/buntdb",
-		"store/load/sqlite",
-		"store/load/redis",
+		"histograms/append",
+		"histograms/range",
+		"histograms/values",
+		"load/memory",
+		"load/buntdb",
+		"load/sqlite",
+		"load/redis",
 	}, names)
 }
 

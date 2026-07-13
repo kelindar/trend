@@ -11,8 +11,9 @@ import (
 type series []byte
 
 type pending struct {
-	Samples  sampleData
-	Counters counterData
+	Samples    sampleData
+	Counters   counterData
+	Histograms histogramData
 }
 
 type sampleData struct {
@@ -52,31 +53,36 @@ func (p *pending) Merge(delta *pending) {
 	}
 	p.Samples.Merge(delta.Samples)
 	p.Counters.Merge(delta.Counters)
+	p.Histograms.Merge(delta.Histograms)
 }
 
 func (p *pending) Reset() {
 	p.Samples.Reset()
 	p.Counters.Reset()
+	p.Histograms.Reset()
 }
 
 func (p *pending) Count() int {
 	if p == nil {
 		return 0
 	}
-	return p.Samples.count() + p.Counters.count()
+	return p.Samples.count() + p.Counters.count() + p.Histograms.count()
 }
 
 func (p *pending) appendable() bool {
 	if p == nil {
 		return true
 	}
-	return p.Samples.appendable() && p.Counters.appendable()
+	return p.Samples.appendable() && p.Counters.appendable() && p.Histograms.appendable()
 }
 
 func (p *pending) minTime() (uint64, bool) {
 	out, ok := p.Samples.minTime()
 	if v, has := p.Counters.minTime(); has && (!ok || v < out) {
-		return v, true
+		out, ok = v, true
+	}
+	if v, has := p.Histograms.minTime(); has && (!ok || v < out) {
+		out, ok = v, true
 	}
 	return out, ok
 }
@@ -87,6 +93,7 @@ func (p *pending) Compact(cutoff time.Time, span time.Duration) {
 	}
 	p.Samples.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
 	p.Counters.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
+	p.Histograms.Compact(uint64(cutoff.Unix()), uint64(span.Seconds()))
 }
 
 func bucketOf(t, span uint64) uint64 {
