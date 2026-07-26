@@ -205,6 +205,10 @@ func (v *sketchValue) addStats(value float64) {
 }
 
 func (v *sketchValue) addExact(value float64) {
+	if v.count > 0 && v.exact == nil {
+		v.addApprox(value)
+		return
+	}
 	v.addStats(value)
 	v.exact = append(v.exact, value)
 }
