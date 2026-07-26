@@ -94,6 +94,7 @@ func TestSketchCompaction(t *testing.T) {
 	require.Len(t, got, 1)
 	assert.Equal(t, uint64(6), got[0].Count())
 	assert.Equal(t, 200.0, got[0].Max())
+	assert.Equal(t, 0.0, got[0].Quantile(0.5))
 }
 
 func TestSketchBuffer(t *testing.T) {
