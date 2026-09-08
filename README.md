@@ -105,6 +105,8 @@ import (
 )
 ```
 
+SQLite and Redis use a local read-through cache by default, with a one-hour entry lifetime and no size limit. Configure it with `cache=false`, `cache_ttl=5m`, or `cache_size=64` (megabytes) in the store URI, or use the matching `WithCache`, `WithCacheTTL`, and `WithCacheSize` constructor options.
+
 ## Benchmarks
 
 ```text

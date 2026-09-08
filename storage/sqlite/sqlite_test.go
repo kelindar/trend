@@ -43,6 +43,24 @@ func TestStore(t *testing.T) {
 	assert.NoError(t, db.Close())
 }
 
+func TestCacheDisabled(t *testing.T) {
+	ctx := context.Background()
+	raw, err := sql.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	wrapped, err := New(raw, "", WithCache(false))
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Update(ctx, "k", func([]byte) ([]byte, error) {
+		return []byte("v1"), nil
+	}))
+	_, err = raw.Exec(`UPDATE trend SET value = ? WHERE key = ?`, []byte("v2"), "k")
+	require.NoError(t, err)
+	got, err := wrapped.Load(ctx, "k")
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(got))
+	assert.NoError(t, wrapped.Close())
+	assert.NoError(t, raw.Close())
+}
+
 func TestLease(t *testing.T) {
 	ctx := context.Background()
 	opened, err := Open(&url.URL{Path: ":memory:", RawQuery: "prefix=p:"})
@@ -73,6 +91,7 @@ func TestOpen(t *testing.T) {
 	tests := []*url.URL{
 		{},
 		{Path: ":memory:"},
+		{Path: ":memory:", RawQuery: "cache=false&cache_ttl=5m&cache_size=1"},
 		{Path: "/:memory:"},
 		{Scheme: "sqlite", Opaque: filepath.Join(t.TempDir(), "opaque.db")},
 		{Path: filepath.Join(t.TempDir(), "trend.db")},

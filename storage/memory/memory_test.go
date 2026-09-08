@@ -17,7 +17,7 @@ import (
 
 func TestStore(t *testing.T) {
 	ctx := context.Background()
-	store, err := New(time.Minute)
+	store, err := New(time.Minute, WithCacheSize(1))
 	require.NoError(t, err)
 	require.NoError(t, store.Update(ctx, "k", func(old []byte) ([]byte, error) {
 		assert.Nil(t, old)
@@ -38,10 +38,14 @@ func TestStore(t *testing.T) {
 }
 
 func TestOpen(t *testing.T) {
-	store, err := Open(&url.URL{RawQuery: "ttl=1m"})
+	store, err := Open(&url.URL{RawQuery: "ttl=1m&size=1"})
 	require.NoError(t, err)
 	assert.NoError(t, store.Close())
 	_, err = Open(&url.URL{RawQuery: "ttl=nope"})
+	assert.Error(t, err)
+	_, err = Open(&url.URL{RawQuery: "size=large"})
+	assert.Error(t, err)
+	_, err = Open(&url.URL{RawQuery: "size=-1"})
 	assert.Error(t, err)
 }
 

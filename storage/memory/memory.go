@@ -7,6 +7,7 @@ package memory
 import (
 	"context"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,6 +16,16 @@ import (
 )
 
 const defaultTTL = 24 * time.Hour
+
+// Option configures an in-memory store.
+type Option func(*bigcache.Config)
+
+// WithCacheSize sets the cache size limit in megabytes. Zero means unlimited.
+func WithCacheSize(size int) Option {
+	return func(cfg *bigcache.Config) {
+		cfg.HardMaxCacheSize = size
+	}
+}
 
 type store struct {
 	mu sync.Mutex
@@ -25,9 +36,10 @@ func init() {
 	trend.Register("memory", Open)
 }
 
-// Open opens an in-memory store. The optional ttl query sets entry lifetime.
+// Open opens an in-memory store. The optional ttl and size queries set entry lifetime and size in megabytes.
 func Open(u *url.URL) (trend.Store, error) {
 	ttl := defaultTTL
+	size := 0
 	if v := u.Query().Get("ttl"); v != "" {
 		parsed, err := time.ParseDuration(v)
 		if err != nil {
@@ -35,15 +47,28 @@ func Open(u *url.URL) (trend.Store, error) {
 		}
 		ttl = parsed
 	}
-	return New(ttl)
+	if v := u.Query().Get("size"); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, err
+		}
+		size = parsed
+	}
+	return New(ttl, WithCacheSize(size))
 }
 
 // New creates an in-memory store.
-func New(ttl time.Duration) (trend.Store, error) {
+func New(ttl time.Duration, opts ...Option) (trend.Store, error) {
 	if ttl <= 0 {
 		ttl = defaultTTL
 	}
-	db, err := bigcache.New(context.Background(), bigcache.DefaultConfig(ttl))
+	cfg := bigcache.DefaultConfig(ttl)
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	db, err := bigcache.New(context.Background(), cfg)
 	if err != nil {
 		return nil, err
 	}

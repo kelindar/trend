@@ -40,10 +40,26 @@ func TestStore(t *testing.T) {
 	assert.NoError(t, client.Close())
 }
 
+func TestCacheDisabled(t *testing.T) {
+	ctx := context.Background()
+	server := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: server.Addr()})
+	wrapped := New(client, "p:", WithCache(false))
+	require.NoError(t, wrapped.Update(ctx, "k", func([]byte) ([]byte, error) {
+		return []byte("v1"), nil
+	}))
+	require.NoError(t, client.Set(ctx, "p:k", []byte("v2"), 0).Err())
+	got, err := wrapped.Load(ctx, "k")
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(got))
+	assert.NoError(t, wrapped.Close())
+	assert.NoError(t, client.Close())
+}
+
 func TestLease(t *testing.T) {
 	ctx := context.Background()
 	server := miniredis.RunT(t)
-	opened, err := Open(&url.URL{Scheme: "redis", Host: server.Addr(), RawQuery: "prefix=p:"})
+	opened, err := Open(&url.URL{Scheme: "redis", Host: server.Addr(), RawQuery: "prefix=p:&cache=false&cache_ttl=5m&cache_size=1"})
 	require.NoError(t, err)
 	s := opened.(interface {
 		Lease(context.Context, string, time.Duration) (func(context.Context) error, bool, error)

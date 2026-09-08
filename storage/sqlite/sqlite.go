@@ -23,12 +23,39 @@ type store struct {
 	own    bool
 }
 
+// Option configures the SQLite store.
+type Option = cached.Option
+
+// WithCache enables or disables the local read-through cache.
+func WithCache(enabled bool) Option { return cached.WithCache(enabled) }
+
+// WithCacheTTL sets the local cache entry lifetime.
+func WithCacheTTL(ttl time.Duration) Option { return cached.WithCacheTTL(ttl) }
+
+// WithCacheSize sets the local cache size limit in megabytes. Zero means unlimited.
+func WithCacheSize(size int) Option { return cached.WithCacheSize(size) }
+
+func wrapCache(primary trend.Store, cfg cached.Config) (trend.Store, error) {
+	if !cfg.Enabled {
+		return primary, nil
+	}
+	cacheStore, err := memory.New(cfg.TTL, memory.WithCacheSize(cfg.Size))
+	if err != nil {
+		return nil, err
+	}
+	return cached.New(primary, cacheStore), nil
+}
+
 func init() {
 	trend.Register("sqlite", Open)
 	trend.Register("sqlite3", Open)
 }
 
 func Open(u *url.URL) (trend.Store, error) {
+	cfg, err := cached.ParseConfig(u.Query())
+	if err != nil {
+		return nil, err
+	}
 	path := sqlitePath(u)
 	if path == "" {
 		path = ":memory:"
@@ -42,24 +69,22 @@ func Open(u *url.URL) (trend.Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	cacheStore, err := memory.New(time.Hour)
+	primary := &store{db: db, prefix: u.Query().Get("prefix"), own: true}
+	out, err := wrapCache(primary, cfg)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	return cached.New(&store{db: db, prefix: u.Query().Get("prefix"), own: true}, cacheStore), nil
+	return out, nil
 }
 
-func New(db *sql.DB, prefix string) (trend.Store, error) {
+func New(db *sql.DB, prefix string, opts ...Option) (trend.Store, error) {
+	cfg := cached.NewConfig(opts...)
 	db.SetMaxOpenConns(1)
 	if err := migrate(db); err != nil {
 		return nil, err
 	}
-	cacheStore, err := memory.New(time.Hour)
-	if err != nil {
-		return nil, err
-	}
-	return cached.New(&store{db: db, prefix: prefix}, cacheStore), nil
+	return wrapCache(&store{db: db, prefix: prefix}, cfg)
 }
 
 func (s *store) Load(ctx context.Context, key string) ([]byte, error) {
