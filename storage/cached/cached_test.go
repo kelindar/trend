@@ -6,6 +6,7 @@ package cached
 import (
 	"context"
 	"errors"
+	"net/url"
 	"testing"
 	"time"
 
@@ -93,6 +94,33 @@ func TestErrors(t *testing.T) {
 	assert.ErrorIs(t, store.Update(ctx, "k", func([]byte) ([]byte, error) {
 		return nil, errTest
 	}), errTest)
+}
+
+func TestConfig(t *testing.T) {
+	cfg := NewConfig()
+	assert.True(t, cfg.Enabled)
+	assert.Equal(t, DefaultTTL, cfg.TTL)
+	assert.Zero(t, cfg.Size)
+
+	cfg = NewConfig(WithCache(false), WithCacheTTL(5*time.Minute), WithCacheSize(64))
+	assert.False(t, cfg.Enabled)
+	assert.Equal(t, 5*time.Minute, cfg.TTL)
+	assert.Equal(t, 64, cfg.Size)
+
+	cfg, err := ParseConfig(url.Values{"cache": {"false"}, "cache_ttl": {"5m"}, "cache_size": {"64"}})
+	require.NoError(t, err)
+	assert.False(t, cfg.Enabled)
+	assert.Equal(t, 5*time.Minute, cfg.TTL)
+	assert.Equal(t, 64, cfg.Size)
+
+	_, err = ParseConfig(url.Values{"cache": {"maybe"}})
+	assert.Error(t, err)
+	_, err = ParseConfig(url.Values{"cache_ttl": {"soon"}})
+	assert.Error(t, err)
+	_, err = ParseConfig(url.Values{"cache_size": {"large"}})
+	assert.Error(t, err)
+	_, err = ParseConfig(url.Values{"cache_size": {"-1"}})
+	assert.Error(t, err)
 }
 
 func TestLease(t *testing.T) {

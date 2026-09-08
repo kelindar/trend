@@ -22,32 +22,53 @@ type store struct {
 	own    bool
 }
 
+// Option configures the Redis store.
+type Option = cached.Option
+
+// WithCache enables or disables the local read-through cache.
+func WithCache(enabled bool) Option { return cached.WithCache(enabled) }
+
+// WithCacheTTL sets the local cache entry lifetime.
+func WithCacheTTL(ttl time.Duration) Option { return cached.WithCacheTTL(ttl) }
+
+// WithCacheSize sets the local cache size limit in megabytes. Zero means unlimited.
+func WithCacheSize(size int) Option { return cached.WithCacheSize(size) }
+
+func wrapCache(primary trend.Store, cfg cached.Config) trend.Store {
+	if !cfg.Enabled {
+		return primary
+	}
+	cacheStore, _ := memory.New(cfg.TTL, memory.WithCacheSize(cfg.Size))
+	return cached.New(primary, cacheStore)
+}
+
 func init() {
 	trend.Register("redis", Open)
 }
 
 func Open(u *url.URL) (trend.Store, error) {
+	cfg, err := cached.ParseConfig(u.Query())
+	if err != nil {
+		return nil, err
+	}
 	clone := *u
 	q := clone.Query()
 	prefix := q.Get("prefix")
 	q.Del("prefix")
+	q.Del("cache")
+	q.Del("cache_ttl")
+	q.Del("cache_size")
 	clone.RawQuery = q.Encode()
 	opt, err := redis.ParseURL(clone.String())
 	if err != nil {
 		return nil, err
 	}
 	db := redis.NewClient(opt)
-	cacheStore, err := memory.New(time.Hour)
-	if err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return cached.New(&store{db: db, prefix: prefix, own: true}, cacheStore), nil
+	return wrapCache(&store{db: db, prefix: prefix, own: true}, cfg), nil
 }
 
-func New(db redis.UniversalClient, prefix string) trend.Store {
-	cacheStore, _ := memory.New(time.Hour)
-	return cached.New(&store{db: db, prefix: prefix}, cacheStore)
+func New(db redis.UniversalClient, prefix string, opts ...Option) trend.Store {
+	return wrapCache(&store{db: db, prefix: prefix}, cached.NewConfig(opts...))
 }
 
 func (s *store) Load(ctx context.Context, key string) ([]byte, error) {
